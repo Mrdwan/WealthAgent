@@ -1,16 +1,24 @@
-FROM python:3.14-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
+# Install Python dependencies
 RUN pip install --no-cache-dir \
-    requests \
-    yfinance \
+    anthropic \
     feedparser \
-    python-telegram-bot \
-    schedule \
     finvizfinance \
-    pydantic
+    pydantic \
+    pydantic-settings \
+    python-telegram-bot \
+    requests \
+    schedule \
+    yfinance
 
+# Copy application source
 COPY src/ /app/
+COPY config/ /app/config/
 
-CMD ["python", "telegram_bot.py"]
+# Ensure runtime directories exist
+RUN mkdir -p /app/data /app/logs
+
+ENTRYPOINT ["python", "entrypoint.py"]

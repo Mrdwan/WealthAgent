@@ -1,44 +1,116 @@
+"""Application settings for WealthAgent.
+
+All values are read from environment variables (or a .env file).
+
+Module-level constants (DB_PATH, LOG_DIR) are always safe to import — they
+carry no API-key dependency.  The ``settings`` singleton at the bottom
+validates every required variable on import; any module that needs API keys
+should import ``settings`` directly.
+
+db.py intentionally does *not* import from this module so that ``init_db()``
+can run without TIINGO_API_KEY / ANTHROPIC_API_KEY being present.
+"""
+
 import os
+from pathlib import Path
 
-# API Keys (set these as environment variables)
-TIINGO_API_KEY = os.environ.get("TIINGO_API_KEY", "")
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:e4b")  # default to gemma4:e4b
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+from pydantic import Field, ValidationError
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# main LLM settings
-MAIN_MODEL = os.environ.get("MAIN_MODEL", "claude-opus-4-6")  # default to claude-opus-4-6
-MAIN_MODEL_API_KEY = os.environ.get("MAIN_MODEL_API_KEY", "")
-MAIN_MODEL_API_URL = os.environ.get("MAIN_MODEL_API_URL", "https://api.anthropic.com/v1/messages")
+# ---------------------------------------------------------------------------
+# Always-available constants (no API-key validation)
+# ---------------------------------------------------------------------------
 
+DB_PATH: Path = Path(os.environ.get("DB_PATH", "/app/data/wealthagent.db"))
+LOG_DIR: Path = Path(os.environ.get("LOG_DIR", "/app/logs"))
 
-# Database
-DB_PATH = os.path.expanduser("./wealthagent.db")
-
-# Paths
-LOG_DIR = os.path.expanduser("./logs")
-
-# Portfolio constants
-MONTHLY_BUDGET_EUR = os.environ.get("MONTHLY_BUDGET_EUR", 2000)  # default to 2000 EUR/month
-LONG_TERM_PCT = os.environ.get("LONG_TERM_PCT", 0.75)
-SHORT_TERM_PCT = os.environ.get("SHORT_TERM_PCT", 0.25)
-CGT_RATE = os.environ.get("CGT_RATE", 0.33)
-ANNUAL_EXEMPTION = os.environ.get("ANNUAL_EXEMPTION", 1270)
-
-# Thresholds
-ALERT_DROP_PCT = os.environ.get("ALERT_DROP_PCT", 10)       # flag if stock drops >10% in 30 days
-STOP_LOSS_PCT = os.environ.get("STOP_LOSS_PCT", 8)         # exit short-term if drops >8%
-DIVIDEND_YIELD_MAX = os.environ.get("DIVIDEND_YIELD_MAX", 2.0)  # deprioritize above this
-
-# RSS feeds for financial news
-RSS_FEEDS = [
-    # General market
-    "https://feeds.finance.yahoo.com/rss/2.0/headline?s=GOOGL,NVDA&region=US&lang=en-US",
-    "https://www.cnbc.com/id/100003114/device/rss/rss.html",  # Top news
-    "https://www.cnbc.com/id/10001147/device/rss/rss.html",   # Markets
-    # Reuters
+_DEFAULT_RSS_FEEDS: list[str] = [
+    # Yahoo Finance S&P 500
+    "https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US",
+    # CNBC – top news and markets
+    "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+    "https://www.cnbc.com/id/10001147/device/rss/rss.html",
+    # Reuters business & finance
     "https://www.reutersagency.com/feed/?best-topics=business-finance&post_type=best",
-    # Finviz
+    # Finviz news
     "https://finviz.com/news_export.ashx?v=1",
+    # Seeking Alpha market currents
+    "https://seekingalpha.com/market_currents.xml",
+    # Investing.com stock news
+    "https://www.investing.com/rss/news_25.rss",
 ]
+
+# ---------------------------------------------------------------------------
+# Settings model
+# ---------------------------------------------------------------------------
+
+
+class Settings(BaseSettings):
+    """Full runtime configuration.  Required fields raise on instantiation if absent."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=False,
+    )
+
+    # --- Required ----------------------------------------------------------------
+    tiingo_api_key: str
+    anthropic_api_key: str
+    telegram_bot_token: str
+    telegram_chat_id: str
+
+    # --- LLM ---------------------------------------------------------------------
+    ollama_base_url: str = "http://ollama:11434"
+    ollama_model: str = "gemma4:e4b"
+    opus_model: str = "claude-opus-4-6"
+
+    # --- Storage -----------------------------------------------------------------
+    db_path: Path = DB_PATH
+    log_dir: Path = LOG_DIR
+
+    # --- Portfolio ---------------------------------------------------------------
+    monthly_budget_eur: float = 2000.0
+    long_term_pct: float = 0.75
+    short_term_pct: float = 0.25
+
+    # --- Tax (Irish CGT defaults) ------------------------------------------------
+    cgt_rate: float = 0.33
+    annual_exemption: float = 1270.0
+
+    # --- Alert thresholds --------------------------------------------------------
+    alert_drop_pct: float = 10.0    # flag if price drops >N% in 30 days
+    stop_loss_pct: float = 8.0      # exit short-term position if drops >N%
+    dividend_yield_max: float = 2.0  # de-prioritise stocks above this yield
+
+    # --- News feeds --------------------------------------------------------------
+    rss_feeds: list[str] = Field(default_factory=lambda: _DEFAULT_RSS_FEEDS.copy())
+
+
+# ---------------------------------------------------------------------------
+# Module-level validation — raises EnvironmentError with a clear message
+# ---------------------------------------------------------------------------
+
+try:
+    settings = Settings()
+except ValidationError as _exc:
+    _missing = [
+        e["loc"][0].upper()
+        for e in _exc.errors()
+        if e.get("type") == "missing"
+    ]
+    _invalid = [
+        f"{e['loc'][0].upper()} ({e['msg']})"
+        for e in _exc.errors()
+        if e.get("type") != "missing"
+    ]
+
+    _lines: list[str] = ["WealthAgent: environment configuration error."]
+    if _missing:
+        _lines += ["", "Missing required variables:"] + [f"  • {v}" for v in _missing]
+    if _invalid:
+        _lines += ["", "Invalid values:"] + [f"  • {v}" for v in _invalid]
+    _lines += ["", "Copy .env.example → .env and fill in the missing values."]
+
+    raise EnvironmentError("\n".join(_lines)) from _exc
