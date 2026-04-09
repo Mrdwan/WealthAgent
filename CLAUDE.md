@@ -12,15 +12,18 @@ deep analysis, surfaced through a Telegram bot.
 docker-compose
 ├── ollama          # local LLM server (gemma4:e4b default)
 └── wealthagent
-    ├── entrypoint.py   → init_db() → validate settings → exec telegram_bot.py
-    ├── telegram_bot.py → bot handlers (commands, scheduled jobs)
-    ├── db.py           → SQLite schema, Pydantic models, connection helpers
+    ├── entrypoint.py      → init_db() → validate settings → exec telegram_bot.py
+    ├── telegram_bot.py    → bot handlers (commands, scheduled jobs)
+    ├── db.py              → SQLite schema, Pydantic models, connection helpers
+    ├── fx_fetcher.py      → ECB daily FX rates → fx_rates table
+    ├── price_fetcher.py   → Tiingo + yfinance prices → price_history table
+    ├── fundamentals.py    → yfinance fundamentals → fundamentals table
     └── config/
-        └── settings.py → pydantic-settings, all env vars
+        └── settings.py    → pydantic-settings, all env vars
 ```
 
-**Data flow (planned):**
-1. Scheduled jobs fetch price history (Tiingo), FX rates, RSS news
+**Data flow:**
+1. Scheduled jobs fetch FX rates (ECB), prices (Tiingo/yfinance), fundamentals (yfinance), RSS news
 2. Local Ollama screens news and scores screener candidates (cheap pass)
 3. Claude API performs deeper analysis and generates trade thesis
 4. Telegram bot delivers alerts and accepts commands
@@ -35,10 +38,14 @@ docker-compose
 │   ├── db.py
 │   ├── entrypoint.py
 │   ├── telegram_bot.py
-│   └── (future modules here)
+│   ├── fx_fetcher.py
+│   ├── price_fetcher.py
+│   └── fundamentals.py
 ├── config/
 │   ├── __init__.py
 │   └── settings.py
+├── tests/              # integration tests — copied to /app/tests/ in the container
+│   └── test_fetchers.py
 ├── data/               # mounted volume — SQLite DB lives here (gitignored)
 ├── logs/               # mounted volume (gitignored)
 ├── Dockerfile
@@ -112,6 +119,18 @@ To test DB init in isolation:
 docker compose run --rm wealthagent python db.py
 ```
 
+To run individual fetchers:
+```bash
+docker compose exec wealthagent python -m fx_fetcher
+docker compose exec wealthagent python -m price_fetcher
+docker compose exec wealthagent python -m fundamentals
+```
+
+To run integration tests (hits live APIs):
+```bash
+docker compose exec wealthagent python tests/test_fetchers.py
+```
+
 ---
 
 ## Environment setup
@@ -145,3 +164,36 @@ list and comments.
 Pool values: `long_term` · `short_term` · `bond`
 Trade actions: `buy` · `sell`
 Screener status: `pending` · `reviewed` · `added` · `rejected`
+
+---
+
+## Data fetchers
+
+### FX rates (`fx_fetcher.py`)
+- Source: ECB daily XML feed (free, no API key).
+- Stores all EUR-based pairs (EURUSD, EURGBP, etc.) in `fx_rates`.
+- `get_rate_for_date(pair, date)` handles weekends/holidays by returning the
+  most recent prior rate.
+- Conversion helpers: `usd_to_eur()`, `gbp_to_eur()` — accept an optional
+  date to use the historical rate.
+
+### Prices (`price_fetcher.py`)
+- **Tiingo** (primary, US equities) — requires `TIINGO_API_KEY`, uses IEX endpoint.
+- **yfinance** (fallback for all tickers, primary for commodities) — free, no key.
+- If Tiingo fails for a ticker, falls back to yfinance automatically with a log warning.
+- Commodities use `_COMMODITY_MAP` for ticker translation (e.g. `XAG` → `SI=F`).
+- `fetch_all_prices()` reads holdings, fetches ECB rates first, then converts
+  each price to EUR using the **same-day FX rate** (critical for Irish CGT).
+- Network timeouts: 15 s for Tiingo, yfinance manages its own.
+
+### Fundamentals (`fundamentals.py`)
+- Source: yfinance `Ticker.info` and `Ticker.calendar`.
+- Stores structured fields + full `raw_json` for future use.
+- Skips bonds and commodities (defined in `_SKIP_TICKERS`).
+- yfinance is flaky — failures are logged and skipped, never crash the run.
+
+### Import pattern
+- Like `db.py`, fetchers read `TIINGO_API_KEY` from `os.environ` directly —
+  they do **not** import `config.settings`, so they can run standalone.
+- `price_fetcher` imports from `fx_fetcher` (for EUR conversion).
+- `fundamentals` imports only from `db`.

@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir \
     anthropic \
     feedparser \
     finvizfinance \
+    lxml \
     pydantic \
     pydantic-settings \
     python-telegram-bot \
@@ -17,6 +18,7 @@ RUN pip install --no-cache-dir \
 # Copy application source
 COPY src/ /app/
 COPY config/ /app/config/
+COPY tests/ /app/tests/
 
 # Ensure runtime directories exist
 RUN mkdir -p /app/data /app/logs
