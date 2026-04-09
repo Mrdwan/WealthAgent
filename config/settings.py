@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     # --- LLM ---------------------------------------------------------------------
     ollama_base_url: str = "http://ollama:11434"
     ollama_model: str = "gemma4:e4b"
-    ollama_timeout: int = 300   # seconds; Pi 5 can take 60–150 s per article
+    ollama_timeout: int = 300  # seconds; Pi 5 can take 60–150 s per article
     opus_model: str = "claude-opus-4-6"
 
     # --- Storage -----------------------------------------------------------------
@@ -81,12 +81,12 @@ class Settings(BaseSettings):
     annual_exemption: float = 1270.0
 
     # --- Alert thresholds --------------------------------------------------------
-    alert_drop_pct: float = 10.0    # flag if price drops >N% in 30 days
-    stop_loss_pct: float = 8.0      # exit short-term position if drops >N%
+    alert_drop_pct: float = 10.0  # flag if price drops >N% in 30 days
+    stop_loss_pct: float = 8.0  # exit short-term position if drops >N%
     dividend_yield_max: float = 2.0  # de-prioritise stocks above this yield
 
     # --- News feeds --------------------------------------------------------------
-    rss_feeds: list[str] = Field(default_factory=lambda: _DEFAULT_RSS_FEEDS.copy())
+    rss_feeds: list[str] = Field(default_factory=_DEFAULT_RSS_FEEDS.copy)
 
 
 # ---------------------------------------------------------------------------
@@ -96,15 +96,9 @@ class Settings(BaseSettings):
 try:
     settings = Settings()
 except ValidationError as _exc:
-    _missing = [
-        e["loc"][0].upper()
-        for e in _exc.errors()
-        if e.get("type") == "missing"
-    ]
+    _missing = [e["loc"][0].upper() for e in _exc.errors() if e.get("type") == "missing"]
     _invalid = [
-        f"{e['loc'][0].upper()} ({e['msg']})"
-        for e in _exc.errors()
-        if e.get("type") != "missing"
+        f"{e['loc'][0].upper()} ({e['msg']})" for e in _exc.errors() if e.get("type") != "missing"
     ]
 
     _lines: list[str] = ["WealthAgent: environment configuration error."]
@@ -114,4 +108,4 @@ except ValidationError as _exc:
         _lines += ["", "Invalid values:"] + [f"  • {v}" for v in _invalid]
     _lines += ["", "Copy .env.example → .env and fill in the missing values."]
 
-    raise EnvironmentError("\n".join(_lines)) from _exc
+    raise OSError("\n".join(_lines)) from _exc

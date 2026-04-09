@@ -12,7 +12,7 @@ CLI usage (inside the container):
 import json
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel
@@ -36,7 +36,7 @@ _ALERT_DROP_PCT: float = float(os.environ.get("ALERT_DROP_PCT", "10.0"))
 class Alert(BaseModel):
     """A triggered alert."""
 
-    type: str          # price_drop | news_signal | opportunity
+    type: str  # price_drop | news_signal | opportunity
     ticker: str | None = None
     details: dict[str, Any]
     triggered_at: datetime
@@ -51,9 +51,7 @@ def _get_held_tickers() -> list[str]:
     """Return all non-bond tickers currently in the portfolio."""
     conn = get_conn()
     try:
-        rows = conn.execute(
-            "SELECT DISTINCT ticker FROM holdings WHERE pool != 'bond'"
-        ).fetchall()
+        rows = conn.execute("SELECT DISTINCT ticker FROM holdings WHERE pool != 'bond'").fetchall()
     finally:
         conn.close()
     return [row["ticker"] for row in rows]
@@ -100,7 +98,7 @@ def check_price_drops(threshold_pct: float | None = None) -> list[Alert]:
             current_date = current_row["date"]
 
             # Get price ~30 days ago (nearest available on or before)
-            cutoff = (datetime.now(tz=timezone.utc) - timedelta(days=30)).date().isoformat()
+            cutoff = (datetime.now(tz=UTC) - timedelta(days=30)).date().isoformat()
             prior_row = conn.execute(
                 "SELECT close_eur, date FROM price_history"
                 " WHERE ticker = ? AND close_eur IS NOT NULL AND date <= ?"
@@ -121,7 +119,10 @@ def check_price_drops(threshold_pct: float | None = None) -> list[Alert]:
             if drop_pct <= -threshold:
                 log.warning(
                     "%s dropped %.1f%% (€%.2f → €%.2f)",
-                    ticker, drop_pct, prior_price, current_price,
+                    ticker,
+                    drop_pct,
+                    prior_price,
+                    current_price,
                 )
                 alerts.append(
                     Alert(
@@ -135,7 +136,7 @@ def check_price_drops(threshold_pct: float | None = None) -> list[Alert]:
                             "prior_date": prior_row["date"],
                             "threshold_pct": threshold,
                         },
-                        triggered_at=datetime.now(tz=timezone.utc),
+                        triggered_at=datetime.now(tz=UTC),
                     )
                 )
     finally:
@@ -166,7 +167,7 @@ def check_news_signals(hours: int = 24) -> list[Alert]:
     if not held:
         return []
 
-    cutoff = (datetime.now(tz=timezone.utc) - timedelta(hours=hours)).isoformat()
+    cutoff = (datetime.now(tz=UTC) - timedelta(hours=hours)).isoformat()
     conn = get_conn()
     try:
         rows = conn.execute(
@@ -202,7 +203,7 @@ def check_news_signals(hours: int = 24) -> list[Alert]:
                         "signal_id": row["id"],
                         "article_id": row["article_id"],
                     },
-                    triggered_at=datetime.now(tz=timezone.utc),
+                    triggered_at=datetime.now(tz=UTC),
                 )
             )
 
@@ -228,7 +229,7 @@ def check_opportunities(hours: int = 24) -> list[Alert]:
     """
     held = {t.upper() for t in _get_held_tickers()}
 
-    cutoff = (datetime.now(tz=timezone.utc) - timedelta(hours=hours)).isoformat()
+    cutoff = (datetime.now(tz=UTC) - timedelta(hours=hours)).isoformat()
     conn = get_conn()
     try:
         rows = conn.execute(
@@ -264,7 +265,7 @@ def check_opportunities(hours: int = 24) -> list[Alert]:
                         "signal_id": row["id"],
                         "article_id": row["article_id"],
                     },
-                    triggered_at=datetime.now(tz=timezone.utc),
+                    triggered_at=datetime.now(tz=UTC),
                 )
             )
 
@@ -325,7 +326,8 @@ def run_all_checks() -> list[Alert]:
 
     log.info(
         "Alert run complete: %d total, %d after dedup",
-        len(all_alerts), len(deduped),
+        len(all_alerts),
+        len(deduped),
     )
     return deduped
 

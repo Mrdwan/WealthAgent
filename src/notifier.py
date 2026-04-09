@@ -10,7 +10,6 @@ CLI usage (inside the container):
 import logging
 import os
 import sys
-from datetime import datetime
 
 import requests
 
@@ -28,9 +27,9 @@ _MAX_MESSAGE_LEN = 4096
 
 # Emoji per alert type
 _ALERT_EMOJI: dict[str, str] = {
-    "price_drop": "\U0001f4c9",    # 📉
-    "news_signal": "\U0001f4f0",   # 📰
-    "opportunity": "\U0001f4c8",   # 📈
+    "price_drop": "\U0001f4c9",  # 📉
+    "news_signal": "\U0001f4f0",  # 📰
+    "opportunity": "\U0001f4c8",  # 📈
 }
 
 

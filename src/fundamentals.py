@@ -51,16 +51,15 @@ def fetch_fundamentals(ticker: str) -> Fundamentals | None:
     next_earnings: date | None = None
     try:
         cal = tk.calendar
-        if cal is not None:
-            # cal can be a dict or DataFrame depending on yfinance version
-            if isinstance(cal, dict):
-                earnings_dates = cal.get("Earnings Date", [])
-                if earnings_dates:
-                    ed = earnings_dates[0]
-                    if hasattr(ed, "date"):
-                        next_earnings = ed.date()
-                    elif isinstance(ed, str):
-                        next_earnings = date.fromisoformat(ed[:10])
+        # cal can be a dict or DataFrame depending on yfinance version
+        if cal is not None and isinstance(cal, dict):
+            earnings_dates = cal.get("Earnings Date", [])
+            if earnings_dates:
+                ed = earnings_dates[0]
+                if hasattr(ed, "date"):
+                    next_earnings = ed.date()
+                elif isinstance(ed, str):
+                    next_earnings = date.fromisoformat(ed[:10])
     except Exception as exc:
         log.debug("Could not parse earnings date for %s: %s", ticker, exc)
 
@@ -136,16 +135,10 @@ def _get_stock_tickers() -> list[str]:
     """Read all non-bond, non-commodity tickers from holdings."""
     conn = get_conn()
     try:
-        rows = conn.execute(
-            "SELECT DISTINCT ticker FROM holdings WHERE pool != 'bond'"
-        ).fetchall()
+        rows = conn.execute("SELECT DISTINCT ticker FROM holdings WHERE pool != 'bond'").fetchall()
     finally:
         conn.close()
-    return [
-        row["ticker"]
-        for row in rows
-        if row["ticker"].upper() not in _SKIP_TICKERS
-    ]
+    return [row["ticker"] for row in rows if row["ticker"].upper() not in _SKIP_TICKERS]
 
 
 def fetch_all_fundamentals() -> list[Fundamentals]:
@@ -178,8 +171,7 @@ def get_latest_fundamentals(ticker: str) -> Fundamentals | None:
     conn = get_conn()
     try:
         row = conn.execute(
-            "SELECT * FROM fundamentals WHERE ticker = ?"
-            " ORDER BY fetched_at DESC LIMIT 1",
+            "SELECT * FROM fundamentals WHERE ticker = ? ORDER BY fetched_at DESC LIMIT 1",
             (ticker,),
         ).fetchone()
     finally:
@@ -203,11 +195,7 @@ def get_latest_fundamentals(ticker: str) -> Fundamentals | None:
         sector=row["sector"],
         industry=row["industry"],
         country=row["country"],
-        next_earnings=(
-            date.fromisoformat(row["next_earnings"])
-            if row["next_earnings"]
-            else None
-        ),
+        next_earnings=(date.fromisoformat(row["next_earnings"]) if row["next_earnings"] else None),
         raw_json=row["raw_json"],
     )
 
@@ -238,10 +226,7 @@ def main() -> None:
         de = f"{f.debt_to_equity:.0f}" if f.debt_to_equity else "—"
         cap = _fmt_cap(f.market_cap)
         sector = (f.sector or "—")[:20]
-        print(
-            f"{f.ticker:<8} {pe:>7} {ps:>7} {rg:>7} "
-            f"{pm:>7} {de:>7} {cap:>10} {sector:<20}"
-        )
+        print(f"{f.ticker:<8} {pe:>7} {ps:>7} {rg:>7} {pm:>7} {de:>7} {cap:>10} {sector:<20}")
 
 
 if __name__ == "__main__":

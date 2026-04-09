@@ -8,8 +8,8 @@ CLI usage (inside the container):
 """
 
 import logging
-import os
-from datetime import datetime, timezone
+import time
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 
 import feedparser
@@ -31,9 +31,8 @@ def _parse_published_at(entry: feedparser.FeedParserDict) -> datetime | None:
     # feedparser provides published_parsed as a time.struct_time
     if entry.get("published_parsed"):
         try:
-            import time
             ts = entry.published_parsed
-            return datetime.fromtimestamp(time.mktime(ts), tz=timezone.utc)
+            return datetime.fromtimestamp(time.mktime(ts), tz=UTC)
         except Exception:
             pass
 
@@ -95,7 +94,7 @@ def fetch_feed(feed_url: str) -> int:
             title=title or None,
             source=source,
             published_at=published_at,
-            fetched_at=datetime.now(tz=timezone.utc),
+            fetched_at=datetime.now(tz=UTC),
             content_snippet=content_snippet,
             processed=0,
         )

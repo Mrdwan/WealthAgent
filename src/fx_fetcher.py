@@ -9,7 +9,7 @@ CLI usage (inside the container):
 
 import logging
 import xml.etree.ElementTree as ET
-from datetime import date, datetime
+from datetime import date
 
 import requests
 
@@ -105,25 +105,19 @@ def get_rate_for_date(pair: str, target: str | date) -> float:
     If the exact date isn't available (weekend / holiday), the most recent
     prior rate is returned.  Raises ``ValueError`` if nothing is found.
     """
-    if isinstance(target, date):
-        target_str = target.isoformat()
-    else:
-        target_str = target
+    target_str = target.isoformat() if isinstance(target, date) else target
 
     conn = get_conn()
     try:
         row = conn.execute(
-            "SELECT rate FROM fx_rates WHERE pair = ? AND date <= ?"
-            " ORDER BY date DESC LIMIT 1",
+            "SELECT rate FROM fx_rates WHERE pair = ? AND date <= ? ORDER BY date DESC LIMIT 1",
             (pair, target_str),
         ).fetchone()
     finally:
         conn.close()
 
     if row is None:
-        raise ValueError(
-            f"No FX rate found for {pair!r} on or before {target_str}"
-        )
+        raise ValueError(f"No FX rate found for {pair!r} on or before {target_str}")
     return float(row["rate"])
 
 

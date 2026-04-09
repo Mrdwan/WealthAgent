@@ -38,6 +38,12 @@ docker-compose
 
 ```
 /
+├── pyproject.toml      # project metadata, deps, and all tool config (ruff, pytest, coverage)
+├── uv.lock             # pinned dependency lockfile — commit this
+├── .pre-commit-config.yaml  # ruff lint + format hooks
+├── Dockerfile          # uses uv for dependency installation
+├── docker-compose.yaml
+├── .env.example
 ├── src/                # Python source — copied to /app/ in the container
 │   ├── db.py
 │   ├── entrypoint.py
@@ -56,10 +62,7 @@ docker-compose
 │   ├── test_fetchers.py
 │   └── test_news_pipeline.py
 ├── data/               # mounted volume — SQLite DB lives here (gitignored)
-├── logs/               # mounted volume (gitignored)
-├── Dockerfile
-├── docker-compose.yaml
-└── .env.example
+└── logs/               # mounted volume (gitignored)
 ```
 
 > `src/` files land at `/app/` root in the container — **not** `/app/src/`.
@@ -86,13 +89,19 @@ docker-compose
 - `tickers` in `news_signals` is stored as a JSON string; use
   `NewsSignal.tickers_json()` to serialise before inserting.
 
-### Code style
+### Code style & linting
 - Python 3.12+ features (`X | Y` unions, `match`, etc.) are fine.
 - Pydantic `BaseModel` for every data structure passed between modules.
 - Type hints on every function signature and module-level variable.
 - `pathlib.Path` for all file paths — no bare strings.
 - Docstrings on all public functions and classes.
 - No hardcoded personal data anywhere.
+- **Ruff** enforces linting and formatting — config lives in `pyproject.toml`.
+  - Lint rules: pycodestyle, pyflakes, isort, pep8-naming, pyupgrade, bugbear,
+    simplify, pylint (convention/error/warning).
+  - Line length: 100.
+- **Pre-commit** runs ruff lint (`--fix`) and ruff format on every commit.
+- All new code must pass `ruff check` and `ruff format --check`.
 
 ### LLM usage pattern
 - **Ollama (local):** news signal extraction, sentiment scoring, cheap repeated inference.
@@ -106,8 +115,61 @@ docker-compose
 
 ## Development workflow
 
-This is a **Docker-first** project. Do not run `pip install` or test modules
-locally — all dependencies are installed in the image.
+### Package management — uv
+
+This project uses **uv** for dependency management. Do not use `pip install`.
+
+```bash
+# Add a dependency
+uv add <package>
+
+# Add a dev dependency
+uv add --group dev <package>
+
+# Sync environment (install all deps)
+uv sync --dev
+
+# Regenerate lockfile after editing pyproject.toml
+uv lock
+```
+
+`uv.lock` must be committed — the Dockerfile uses `uv sync --frozen` for
+reproducible builds.
+
+### Linting & formatting
+
+```bash
+# Lint (auto-fix where possible)
+uv run ruff check --fix src/ config/ tests/
+
+# Format
+uv run ruff format src/ config/ tests/
+
+# Run pre-commit hooks manually on all files
+uv run pre-commit run --all-files
+```
+
+Pre-commit hooks run automatically on `git commit`. To install after a fresh
+clone: `uv run pre-commit install`.
+
+### Testing & coverage
+
+```bash
+# Run tests with coverage (locally — unit tests only)
+uv run pytest --cov --cov-branch --cov-report=term-missing
+
+# HTML coverage report
+uv run pytest --cov --cov-branch --cov-report=html
+```
+
+Coverage target: **100% line and branch**. Config in `pyproject.toml`
+(`fail_under = 100`). Excluded from coverage: `if __name__` blocks,
+`TYPE_CHECKING` guards, and lines marked `# pragma: no cover`.
+
+### Docker
+
+This is a **Docker-first** project for runtime. The Dockerfile uses uv to
+install dependencies from the lockfile.
 
 ```bash
 # Build and start everything
@@ -153,12 +215,12 @@ docker compose exec wealthagent python -m alert_engine
 docker compose exec wealthagent python -m notifier "WealthAgent test message"
 ```
 
-To run integration tests (hits live APIs):
+To run integration tests in the container (hits live APIs):
 ```bash
 docker compose exec wealthagent python tests/test_fetchers.py
 ```
 
-To run news pipeline tests (Ollama tests auto-skip if not reachable):
+To run news pipeline tests in the container (Ollama tests auto-skip if not reachable):
 ```bash
 docker compose exec wealthagent python tests/test_news_pipeline.py
 ```

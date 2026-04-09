@@ -12,13 +12,13 @@ CLI usage (inside the container):
 
 import logging
 import os
-from datetime import date, datetime
+from datetime import date
 
 import requests
 import yfinance as yf
 
 from db import PricePoint, db_conn, get_conn
-from fx_fetcher import fetch_ecb_rates, get_rate_for_date, usd_to_eur
+from fx_fetcher import fetch_ecb_rates, get_rate_for_date
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,7 +46,7 @@ def _tiingo_headers() -> dict[str, str]:
     """Return Tiingo auth headers.  Raises if API key is missing."""
     key = os.environ.get("TIINGO_API_KEY", "")
     if not key:
-        raise EnvironmentError("TIINGO_API_KEY is not set")
+        raise OSError("TIINGO_API_KEY is not set")
     return {
         "Content-Type": "application/json",
         "Authorization": f"Token {key}",
@@ -150,9 +150,7 @@ def _get_holdings_tickers() -> list[str]:
     """Read all non-bond tickers from the holdings table."""
     conn = get_conn()
     try:
-        rows = conn.execute(
-            "SELECT DISTINCT ticker FROM holdings WHERE pool != 'bond'"
-        ).fetchall()
+        rows = conn.execute("SELECT DISTINCT ticker FROM holdings WHERE pool != 'bond'").fetchall()
     finally:
         conn.close()
     return [row["ticker"] for row in rows]
@@ -234,8 +232,7 @@ def get_current_price(ticker: str) -> PricePoint | None:
     conn = get_conn()
     try:
         row = conn.execute(
-            "SELECT * FROM price_history WHERE ticker = ?"
-            " ORDER BY date DESC LIMIT 1",
+            "SELECT * FROM price_history WHERE ticker = ? ORDER BY date DESC LIMIT 1",
             (ticker,),
         ).fetchone()
     finally:
@@ -259,8 +256,7 @@ def get_price_on_date(ticker: str, target: str | date) -> PricePoint | None:
     conn = get_conn()
     try:
         row = conn.execute(
-            "SELECT * FROM price_history WHERE ticker = ? AND date <= ?"
-            " ORDER BY date DESC LIMIT 1",
+            "SELECT * FROM price_history WHERE ticker = ? AND date <= ? ORDER BY date DESC LIMIT 1",
             (ticker, target_str),
         ).fetchone()
     finally:

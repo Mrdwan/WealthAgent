@@ -17,7 +17,7 @@ import json
 import os
 import sys
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -48,8 +48,20 @@ from db import init_db  # noqa: E402
 init_db()
 
 # Now import the pipeline modules
-from alert_engine import Alert, check_news_signals, check_opportunities, check_price_drops, run_all_checks  # noqa: E402
-from news_extractor import ExtractedSignal, _parse_signal_from_content, call_ollama, filter_relevant_signals, process_unprocessed  # noqa: E402
+from alert_engine import (  # noqa: E402
+    Alert,
+    check_news_signals,
+    check_opportunities,
+    check_price_drops,
+    run_all_checks,
+)
+from news_extractor import (  # noqa: E402
+    ExtractedSignal,
+    _parse_signal_from_content,
+    call_ollama,
+    filter_relevant_signals,
+    process_unprocessed,
+)
 from notifier import _format_alert, _split_message, send_alert, send_message  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -95,7 +107,7 @@ def _seed_price(
     """Insert a price record N days ago."""
     from db import db_conn  # noqa: PLC0415
 
-    dt = (datetime.now(tz=timezone.utc) - timedelta(days=days_ago)).date().isoformat()
+    dt = (datetime.now(tz=UTC) - timedelta(days=days_ago)).date().isoformat()
     with db_conn() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO price_history"
@@ -115,15 +127,12 @@ def _seed_article(
 
     with db_conn() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO news_articles (url, title, processed)"
-            " VALUES (?, ?, ?)",
+            "INSERT OR IGNORE INTO news_articles (url, title, processed) VALUES (?, ?, ?)",
             (url, title, processed),
         )
     conn2 = get_conn()
     try:
-        row = conn2.execute(
-            "SELECT id FROM news_articles WHERE url = ?", (url,)
-        ).fetchone()
+        row = conn2.execute("SELECT id FROM news_articles WHERE url = ?", (url,)).fetchone()
     finally:
         conn2.close()
     return row["id"]
@@ -139,7 +148,7 @@ def _seed_signal(
     """Insert a test news signal."""
     from db import db_conn  # noqa: PLC0415
 
-    dt = (datetime.now(tz=timezone.utc) - timedelta(hours=hours_ago)).isoformat()
+    dt = (datetime.now(tz=UTC) - timedelta(hours=hours_ago)).isoformat()
     with db_conn() as conn:
         conn.execute(
             "INSERT INTO news_signals"
@@ -168,13 +177,15 @@ def test_json_parser() -> None:
     """Test _parse_signal_from_content with various malformed inputs."""
     print("\n=== JSON Parser (no Ollama) ===")
 
-    valid_json = json.dumps({
-        "tickers": ["AAPL", "MSFT"],
-        "sentiment": "positive",
-        "catalyst": "earnings",
-        "timeframe": "weeks",
-        "summary": "Strong quarterly results drove shares higher.",
-    })
+    valid_json = json.dumps(
+        {
+            "tickers": ["AAPL", "MSFT"],
+            "sentiment": "positive",
+            "catalyst": "earnings",
+            "timeframe": "weeks",
+            "summary": "Strong quarterly results drove shares higher.",
+        }
+    )
 
     # 1. Plain JSON
     sig = _parse_signal_from_content(valid_json)
@@ -200,13 +211,15 @@ def test_json_parser() -> None:
     check("Malformed input raises ValueError", raised)
 
     # 5. Neutral / empty tickers (as returned for non-company articles)
-    neutral_json = json.dumps({
-        "tickers": [],
-        "sentiment": "neutral",
-        "catalyst": "none",
-        "timeframe": "days",
-        "summary": "General market commentary with no specific company mentioned.",
-    })
+    neutral_json = json.dumps(
+        {
+            "tickers": [],
+            "sentiment": "neutral",
+            "catalyst": "none",
+            "timeframe": "days",
+            "summary": "General market commentary with no specific company mentioned.",
+        }
+    )
     sig5 = _parse_signal_from_content(neutral_json)
     check("Empty tickers parsed", sig5.tickers == [])
     check("Neutral sentiment parsed", sig5.sentiment == "neutral")
@@ -234,6 +247,7 @@ def test_call_ollama() -> None:
     ollama_available = True
     try:
         import requests  # noqa: PLC0415
+
         resp = requests.get(
             os.environ.get("OLLAMA_BASE_URL", "http://ollama:11434") + "/api/tags",
             timeout=5,
@@ -256,9 +270,15 @@ def test_call_ollama() -> None:
         )
         check(
             "Catalyst is valid literal",
-            sig.catalyst in (
-                "earnings", "regulation", "product", "macro",
-                "leadership", "acquisition", "none",
+            sig.catalyst
+            in (
+                "earnings",
+                "regulation",
+                "product",
+                "macro",
+                "leadership",
+                "acquisition",
+                "none",
             ),
             sig.catalyst,
         )
@@ -283,6 +303,7 @@ def test_process_unprocessed() -> None:
     ollama_available = True
     try:
         import requests  # noqa: PLC0415
+
         resp = requests.get(
             os.environ.get("OLLAMA_BASE_URL", "http://ollama:11434") + "/api/tags",
             timeout=5,
@@ -329,8 +350,8 @@ def test_alert_engine() -> None:
 
     # --- Price drop test ---
     _seed_holding("TSLA", pool="short_term")
-    _seed_price("TSLA", price_eur=200.0, days_ago=35)   # price 35 days ago
-    _seed_price("TSLA", price_eur=160.0, days_ago=0)    # current price (−20%)
+    _seed_price("TSLA", price_eur=200.0, days_ago=35)  # price 35 days ago
+    _seed_price("TSLA", price_eur=160.0, days_ago=0)  # current price (−20%)
 
     drops = check_price_drops(threshold_pct=10.0)
     tsla_drops = [a for a in drops if a.ticker == "TSLA"]
@@ -343,7 +364,7 @@ def test_alert_engine() -> None:
     # Ticker that hasn't dropped enough should NOT trigger
     _seed_holding("GOOG", pool="long_term")
     _seed_price("GOOG", price_eur=100.0, days_ago=35)
-    _seed_price("GOOG", price_eur=97.0, days_ago=0)   # only −3%
+    _seed_price("GOOG", price_eur=97.0, days_ago=0)  # only −3%
 
     drops_goog = [a for a in check_price_drops(threshold_pct=10.0) if a.ticker == "GOOG"]
     check("GOOG small drop not triggered", len(drops_goog) == 0)
@@ -377,8 +398,7 @@ def test_alert_engine() -> None:
     # Only signals with confidence >= 0.6 should appear
     all_signals = check_news_signals(hours=24)
     low_conf = [
-        a for a in all_signals
-        if a.ticker == "NVDA" and a.details.get("confidence", 1.0) < 0.6
+        a for a in all_signals if a.ticker == "NVDA" and a.details.get("confidence", 1.0) < 0.6
     ]
     check("Low-confidence signals excluded", len(low_conf) == 0)
 
@@ -386,7 +406,7 @@ def test_alert_engine() -> None:
     article_id3 = _seed_article(url="https://example.com/opp-news", title="Opportunity article")
     _seed_signal(
         article_id=article_id3,
-        tickers=["AMZN"],   # not held
+        tickers=["AMZN"],  # not held
         sentiment="positive",
         confidence=0.85,
         hours_ago=1,
@@ -510,7 +530,7 @@ def test_notifier() -> None:
                 "prior_date": "2024-03-10",
                 "threshold_pct": 10.0,
             },
-            triggered_at=datetime.now(tz=timezone.utc),
+            triggered_at=datetime.now(tz=UTC),
         )
         drop_text = _format_alert(drop_alert)
         check("Price drop alert contains ticker", "TSLA" in drop_text)
@@ -528,7 +548,7 @@ def test_notifier() -> None:
                 "signal_id": 1,
                 "article_id": 1,
             },
-            triggered_at=datetime.now(tz=timezone.utc),
+            triggered_at=datetime.now(tz=UTC),
         )
         news_text = _format_alert(news_alert)
         check("News signal alert contains ticker", "NVDA" in news_text)

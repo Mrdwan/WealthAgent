@@ -1,0 +1,84 @@
+[project]
+name = "wealthagent"
+version = "0.1.0"
+description = "Investment pipeline for Raspberry Pi 5"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic",
+    "feedparser",
+    "finvizfinance",
+    "lxml",
+    "pydantic",
+    "pydantic-settings",
+    "python-telegram-bot",
+    "requests",
+    "schedule",
+    "yfinance",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit",
+    "pytest",
+    "pytest-cov",
+    "ruff",
+]
+
+# ---------------------------------------------------------------------------
+# Ruff
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "config", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "PLC",  # pylint convention
+    "PLE",  # pylint error
+    "PLW",  # pylint warning
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["config"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    "E402",    # module-level imports not at top (bootstrap needed)
+    "SIM115",  # NamedTemporaryFile at module level (can't use context manager)
+    "PLW0603", # global counters in test helpers
+    "PLC0415", # lazy imports after bootstrap
+    "SIM105",  # try/except/pass for cleanup is clearer in test teardown
+]
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+# ---------------------------------------------------------------------------
+# Coverage
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["src", "config"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true
+skip_empty = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
+    "if TYPE_CHECKING:",
+]

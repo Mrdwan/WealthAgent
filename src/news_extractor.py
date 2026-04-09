@@ -12,7 +12,7 @@ import json
 import logging
 import re
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 import requests
@@ -54,8 +54,7 @@ class ExtractedSignal(BaseModel):
     tickers: list[str]
     sentiment: Literal["positive", "negative", "neutral"]
     catalyst: Literal[
-        "earnings", "regulation", "product", "macro",
-        "leadership", "acquisition", "none"
+        "earnings", "regulation", "product", "macro", "leadership", "acquisition", "none"
     ]
     timeframe: Literal["days", "weeks", "months", "years"]
     summary: str
@@ -85,7 +84,10 @@ def _post_to_ollama(payload: dict) -> str:
             if attempt < _RETRY_ATTEMPTS - 1:
                 log.warning(
                     "Ollama connection error (attempt %d/%d), retrying in %ds: %s",
-                    attempt + 1, _RETRY_ATTEMPTS, _RETRY_DELAY, exc,
+                    attempt + 1,
+                    _RETRY_ATTEMPTS,
+                    _RETRY_DELAY,
+                    exc,
                 )
                 time.sleep(_RETRY_DELAY)
             else:
@@ -237,7 +239,7 @@ def _store_signal(
     confidence: float,
 ) -> None:
     """Persist an extracted signal to the news_signals table."""
-    now = datetime.now(tz=timezone.utc).isoformat()
+    now = datetime.now(tz=UTC).isoformat()
     db_signal = NewsSignal(
         article_id=article_id,
         tickers=signal.tickers,
@@ -246,7 +248,7 @@ def _store_signal(
         timeframe=signal.timeframe,
         summary=signal.summary,
         confidence=confidence,
-        extracted_at=datetime.now(tz=timezone.utc),
+        extracted_at=datetime.now(tz=UTC),
     )
 
     with db_conn() as conn:
@@ -289,7 +291,8 @@ def process_unprocessed(use_confidence_scoring: bool = False) -> int:
 
     log.info(
         "Processing %d articles (confidence_scoring=%s)",
-        len(articles), use_confidence_scoring,
+        len(articles),
+        use_confidence_scoring,
     )
     processed_count = 0
 
@@ -309,14 +312,19 @@ def process_unprocessed(use_confidence_scoring: bool = False) -> int:
             elapsed = time.monotonic() - start
             log.info(
                 "article_id=%d tickers=%s sentiment=%s (%.2fs)",
-                article_id, signal.tickers, signal.sentiment, elapsed,
+                article_id,
+                signal.tickers,
+                signal.sentiment,
+                elapsed,
             )
             processed_count += 1
         except Exception as exc:
             elapsed = time.monotonic() - start
             log.error(
                 "Failed to process article_id=%d (%.2fs): %s",
-                article_id, elapsed, exc,
+                article_id,
+                elapsed,
+                exc,
             )
             # Continue — never crash on a single article failure
 
@@ -339,9 +347,7 @@ def filter_relevant_signals(portfolio_tickers: list[str]) -> list[NewsSignal]:
 
     conn = get_conn()
     try:
-        rows = conn.execute(
-            "SELECT * FROM news_signals ORDER BY extracted_at DESC"
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM news_signals ORDER BY extracted_at DESC").fetchall()
     finally:
         conn.close()
 
@@ -350,7 +356,8 @@ def filter_relevant_signals(portfolio_tickers: list[str]) -> list[NewsSignal]:
         try:
             signal_tickers = set(json.loads(row["tickers"] or "[]"))
             # Normalise to uppercase for comparison
-            if signal_tickers & upper_tickers or {t.upper() for t in signal_tickers} & upper_tickers:
+            normalised = signal_tickers | {t.upper() for t in signal_tickers}
+            if normalised & upper_tickers:
                 relevant.append(
                     NewsSignal(
                         id=row["id"],

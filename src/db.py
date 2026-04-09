@@ -3,10 +3,10 @@
 import json
 import os
 import sqlite3
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
-from typing import Generator
 
 from pydantic import BaseModel, Field
 
@@ -99,7 +99,7 @@ class NewsSignal(BaseModel):
     id: int | None = None
     article_id: int
     tickers: list[str] = Field(default_factory=list)
-    sentiment: str | None = None   # bullish | bearish | neutral
+    sentiment: str | None = None  # bullish | bearish | neutral
     catalyst: str | None = None
     timeframe: str | None = None
     summary: str | None = None
@@ -161,7 +161,7 @@ class AlertLog(BaseModel):
     id: int | None = None
     triggered_at: datetime | None = None
     ticker: str | None = None
-    alert_type: str | None = None   # price_drop | news_signal | opportunity
+    alert_type: str | None = None  # price_drop | news_signal | opportunity
     details: str | None = None
     action_taken: str | None = None
 
@@ -314,7 +314,8 @@ CREATE TABLE IF NOT EXISTS screener_candidates (
     country         TEXT,
     llm_score       REAL CHECK(llm_score IS NULL OR (llm_score >= 0 AND llm_score <= 10)),
     llm_thesis      TEXT,
-    status          TEXT DEFAULT 'pending' CHECK(status IN ('pending','reviewed','added','rejected'))
+    status          TEXT DEFAULT 'pending'
+                    CHECK(status IN ('pending','reviewed','added','rejected'))
 );
 
 CREATE TABLE IF NOT EXISTS alerts_log (
