@@ -64,7 +64,7 @@ known-first-party = ["config"]
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 
 # ---------------------------------------------------------------------------
 # Coverage

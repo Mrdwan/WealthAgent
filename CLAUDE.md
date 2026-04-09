@@ -149,8 +149,9 @@ uv run ruff format src/ config/ tests/
 uv run pre-commit run --all-files
 ```
 
-Pre-commit hooks run automatically on `git commit`. To install after a fresh
-clone: `uv run pre-commit install`.
+Pre-commit hooks run automatically on `git commit` (ruff lint → ruff format →
+pytest with 100% coverage gate). To install after a fresh clone:
+`uv run pre-commit install`.
 
 ### Testing & coverage
 
