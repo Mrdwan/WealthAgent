@@ -7,6 +7,8 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    networks:
+      - wealthnet
     healthcheck:
       test: ["CMD-SHELL", "ollama list | grep -q ${OLLAMA_MODEL:-gemma4:e4b} || exit 1"]
 
@@ -23,7 +25,12 @@ services:
       - ./logs:/app/logs
     env_file:
       - .env
-    network_mode: host
+    networks:
+      - wealthnet
+
+networks:
+  wealthnet:
+    driver: bridge
 
 volumes:
   ollama_data:

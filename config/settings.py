@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     # --- LLM ---------------------------------------------------------------------
     ollama_base_url: str = "http://ollama:11434"
     ollama_model: str = "gemma4:e4b"
+    ollama_timeout: int = 300   # seconds; Pi 5 can take 60–150 s per article
     opus_model: str = "claude-opus-4-6"
 
     # --- Storage -----------------------------------------------------------------
