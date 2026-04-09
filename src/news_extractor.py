@@ -99,7 +99,7 @@ def _post_to_ollama(payload: dict) -> str:
             ) from exc
 
     # Should not be reached, but satisfy the type checker
-    raise last_exc  # type: ignore[misc]
+    raise last_exc  # type: ignore[misc]  # pragma: no cover
 
 
 def _parse_signal_from_content(content: str) -> ExtractedSignal:
