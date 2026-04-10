@@ -189,7 +189,7 @@ Run modules in the container: `docker compose exec wealthagent python -m <module
 
 ```bash
 cp .env.example .env
-# Fill in: TIINGO_API_KEY, ANTHROPIC_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+# Fill in: TIINGO_API_KEY, ADVISOR_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 ```
 
 All other variables have sensible defaults — see `.env.example`.

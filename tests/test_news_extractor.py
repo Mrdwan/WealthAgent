@@ -9,8 +9,6 @@ import requests as req_lib
 
 from db import db_conn, get_conn
 
-# --- _post_to_ollama ---
-
 
 def _ollama_response(content: str):
     resp = mock.MagicMock()
@@ -28,53 +26,6 @@ def _signal_json(**overrides):
     }
     data.update(overrides)
     return json.dumps(data)
-
-
-def test_post_to_ollama_success():
-    from news_extractor import _post_to_ollama
-
-    with mock.patch("news_extractor.requests.post", return_value=_ollama_response("ok")):
-        assert _post_to_ollama({"model": "test"}) == "ok"
-
-
-def test_post_to_ollama_retry_then_succeed():
-    from news_extractor import _post_to_ollama
-
-    with (
-        mock.patch(
-            "news_extractor.requests.post",
-            side_effect=[req_lib.exceptions.ConnectionError("fail"), _ollama_response("ok")],
-        ),
-        mock.patch("news_extractor.time.sleep"),
-    ):
-        assert _post_to_ollama({"model": "test"}) == "ok"
-
-
-def test_post_to_ollama_all_retries_fail():
-    from news_extractor import _post_to_ollama
-
-    with (
-        mock.patch(
-            "news_extractor.requests.post",
-            side_effect=req_lib.exceptions.ConnectionError("fail"),
-        ),
-        mock.patch("news_extractor.time.sleep"),
-        pytest.raises(req_lib.exceptions.ConnectionError),
-    ):
-        _post_to_ollama({"model": "test"})
-
-
-def test_post_to_ollama_timeout():
-    from news_extractor import _post_to_ollama
-
-    with (
-        mock.patch(
-            "news_extractor.requests.post",
-            side_effect=req_lib.exceptions.Timeout("timed out"),
-        ),
-        pytest.raises(TimeoutError, match="Ollama timed out"),
-    ):
-        _post_to_ollama({"model": "test"})
 
 
 # --- _parse_signal_from_content (gap coverage) ---
@@ -105,7 +56,7 @@ def test_call_ollama():
     from news_extractor import call_ollama
 
     with mock.patch(
-        "news_extractor.requests.post",
+        "ollama_client.requests.post",
         return_value=_ollama_response(_signal_json()),
     ):
         sig = call_ollama("Apple earnings beat expectations")
@@ -120,7 +71,7 @@ def test_score_confidence_all_agree():
     from news_extractor import score_confidence
 
     with mock.patch(
-        "news_extractor.requests.post",
+        "ollama_client.requests.post",
         return_value=_ollama_response(_signal_json()),
     ):
         sig, conf = score_confidence("Apple earnings")
@@ -135,7 +86,7 @@ def test_score_confidence_sentiment_disagree():
         _ollama_response(_signal_json(sentiment="negative")),
         _ollama_response(_signal_json(sentiment="positive")),
     ]
-    with mock.patch("news_extractor.requests.post", side_effect=resps):
+    with mock.patch("ollama_client.requests.post", side_effect=resps):
         _, conf = score_confidence("Test")
     assert conf == 0.6  # tickers agree, sentiment disagrees
 
@@ -148,7 +99,7 @@ def test_score_confidence_all_disagree():
         _ollama_response(_signal_json(tickers=["MSFT"], sentiment="negative")),
         _ollama_response(_signal_json(tickers=["GOOG"], sentiment="neutral")),
     ]
-    with mock.patch("news_extractor.requests.post", side_effect=resps):
+    with mock.patch("ollama_client.requests.post", side_effect=resps):
         _, conf = score_confidence("Test")
     assert conf == 0.3
 
@@ -157,7 +108,7 @@ def test_score_confidence_partial_failure():
     from news_extractor import score_confidence
 
     with mock.patch(
-        "news_extractor.requests.post",
+        "ollama_client.requests.post",
         side_effect=[_ollama_response(_signal_json()), Exception("fail"), Exception("fail")],
     ):
         _, conf = score_confidence("Test")
@@ -168,7 +119,7 @@ def test_score_confidence_all_fail():
     from news_extractor import score_confidence
 
     with (
-        mock.patch("news_extractor.requests.post", side_effect=Exception("fail")),
+        mock.patch("ollama_client.requests.post", side_effect=Exception("fail")),
         pytest.raises(RuntimeError, match="All Ollama extraction attempts failed"),
     ):
         score_confidence("Test")
@@ -224,7 +175,7 @@ def test_process_unprocessed_success():
 
     _seed_article()
     with mock.patch(
-        "news_extractor.requests.post",
+        "ollama_client.requests.post",
         return_value=_ollama_response(_signal_json()),
     ):
         assert process_unprocessed(use_confidence_scoring=False) == 1
@@ -245,7 +196,7 @@ def test_process_unprocessed_with_confidence():
 
     _seed_article(url="https://example.com/conf")
     with mock.patch(
-        "news_extractor.requests.post",
+        "ollama_client.requests.post",
         return_value=_ollama_response(_signal_json()),
     ):
         assert process_unprocessed(use_confidence_scoring=True) == 1
@@ -257,10 +208,10 @@ def test_process_unprocessed_failure():
     _seed_article(url="https://example.com/fail")
     with (
         mock.patch(
-            "news_extractor.requests.post",
+            "ollama_client.requests.post",
             side_effect=req_lib.exceptions.ConnectionError("down"),
         ),
-        mock.patch("news_extractor.time.sleep"),
+        mock.patch("ollama_client.time.sleep"),
     ):
         assert process_unprocessed(use_confidence_scoring=False) == 0
 

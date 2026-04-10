@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Investment pipeline for Raspberry Pi 5"
 requires-python = ">=3.12"
 dependencies = [
-    "anthropic",
     "feedparser",
     "finvizfinance",
     "lxml",
@@ -58,6 +57,13 @@ known-first-party = ["config"]
     "PLW0603", # global counters in test helpers
     "PLC0415", # lazy imports after bootstrap
     "SIM105",  # try/except/pass for cleanup is clearer in test teardown
+    "PLW0108", # lambda wrappers are clearer in monkeypatch test fixtures
+]
+"src/run_pipeline.py" = [
+    "PLC0415", # lazy imports in cmd_* functions are intentional (import what you need)
+]
+"src/screener.py" = [
+    "PLC0415", # lazy import of finvizfinance inside try/except (fragile, may not be installed)
 ]
 
 # ---------------------------------------------------------------------------

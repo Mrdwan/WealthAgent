@@ -21,10 +21,6 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# Tickers that are commodities / non-equity — skip fundamentals
-_SKIP_TICKERS: set[str] = {"XAG", "XAGUSD", "SI"}
-
-
 # ---------------------------------------------------------------------------
 # Fetch & store
 # ---------------------------------------------------------------------------
@@ -132,19 +128,19 @@ def _fmt_cap(cap: float | None) -> str:
 
 
 def _get_stock_tickers() -> list[str]:
-    """Read all non-bond, non-commodity tickers from holdings."""
+    """Read all non-bond tickers from holdings."""
     conn = get_conn()
     try:
         rows = conn.execute("SELECT DISTINCT ticker FROM holdings WHERE pool != 'bond'").fetchall()
     finally:
         conn.close()
-    return [row["ticker"] for row in rows if row["ticker"].upper() not in _SKIP_TICKERS]
+    return [row["ticker"] for row in rows]
 
 
 def fetch_all_fundamentals() -> list[Fundamentals]:
     """Fetch fundamentals for every stock holding.
 
-    Skips bonds and commodities. Continues on failure for individual tickers.
+    Skips bonds. Continues on failure for individual tickers.
     """
     tickers = _get_stock_tickers()
     if not tickers:

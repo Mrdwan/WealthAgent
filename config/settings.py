@@ -78,15 +78,18 @@ class Settings(BaseSettings):
 
     # API keys — validated at point of use, not here
     tiingo_api_key: str | None = None
-    anthropic_api_key: str | None = None
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
 
-    # LLM
+    # LLM — local Ollama for cheap inference
     ollama_base_url: str = "http://ollama:11434"
     ollama_model: str = "gemma4:e4b"
     ollama_timeout: int = 300
-    opus_model: str = "claude-opus-4-6"
+
+    # LLM — advisor (deep analysis via OpenAI-compatible API)
+    advisor_model: str = "claude-opus-4-6"
+    advisor_api_key: str | None = None
+    advisor_base_url: str | None = None
 
     # Portfolio
     monthly_budget_eur: float = 2000.0

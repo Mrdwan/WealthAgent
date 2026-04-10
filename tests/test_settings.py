@@ -18,6 +18,9 @@ def test_settings_defaults(monkeypatch):
     assert s.tiingo_api_key is None
     assert s.ollama_timeout == 300
     assert len(s.rss_feeds) > 0
+    assert s.advisor_model == "claude-opus-4-6"
+    assert s.advisor_api_key is None
+    assert s.advisor_base_url is None
 
 
 def test_settings_custom_values():

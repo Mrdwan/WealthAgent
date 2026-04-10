@@ -15,20 +15,17 @@ import time
 from datetime import UTC, datetime
 from typing import Literal
 
-import requests
 from pydantic import BaseModel, ValidationError
 
 from config.settings import settings
 from db import NewsSignal, db_conn, get_conn
+from ollama_client import post_chat_completion
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 log = logging.getLogger(__name__)
-
-_RETRY_ATTEMPTS = 3
-_RETRY_DELAY = 10  # seconds between retries on connection error
 
 _SYSTEM_PROMPT = (
     "You are a financial news extraction tool. "
@@ -60,43 +57,6 @@ class ExtractedSignal(BaseModel):
 # ---------------------------------------------------------------------------
 # Ollama API helper
 # ---------------------------------------------------------------------------
-
-
-def _post_to_ollama(payload: dict) -> str:
-    """POST payload to Ollama /v1/chat/completions and return the content string.
-
-    Retries up to _RETRY_ATTEMPTS times on connection errors with _RETRY_DELAY
-    seconds between attempts.
-    """
-    url = f"{settings.ollama_base_url}/v1/chat/completions"
-    last_exc: Exception | None = None
-
-    for attempt in range(_RETRY_ATTEMPTS):
-        try:
-            resp = requests.post(url, json=payload, timeout=settings.ollama_timeout)
-            resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
-        except requests.exceptions.ConnectionError as exc:
-            last_exc = exc
-            if attempt < _RETRY_ATTEMPTS - 1:
-                log.warning(
-                    "Ollama connection error (attempt %d/%d), retrying in %ds: %s",
-                    attempt + 1,
-                    _RETRY_ATTEMPTS,
-                    _RETRY_DELAY,
-                    exc,
-                )
-                time.sleep(_RETRY_DELAY)
-            else:
-                raise
-        except requests.exceptions.Timeout as exc:
-            raise TimeoutError(
-                f"Ollama timed out after {settings.ollama_timeout}s — "
-                "set OLLAMA_TIMEOUT env var to increase"
-            ) from exc
-
-    # Should not be reached, but satisfy the type checker
-    raise last_exc  # type: ignore[misc]  # pragma: no cover
 
 
 def _parse_signal_from_content(content: str) -> ExtractedSignal:
@@ -161,7 +121,7 @@ def call_ollama(article_text: str, temperature: float = 0.1) -> ExtractedSignal:
         },
     }
 
-    content = _post_to_ollama(payload)
+    content = post_chat_completion(payload)
     return _parse_signal_from_content(content)
 
 

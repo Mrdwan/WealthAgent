@@ -94,7 +94,7 @@ def _mock_parsed(entries, bozo=False, bozo_exception=None, feed_title="Test Feed
     p.bozo = bozo
     p.entries = entries
     p.bozo_exception = bozo_exception
-    p.feed.get = lambda k, default=None: ({"title": feed_title}.get(k) if k == "title" else default)
+    p.feed.get = lambda k, default=None: {"title": feed_title}.get(k) if k == "title" else default
     return p
 
 

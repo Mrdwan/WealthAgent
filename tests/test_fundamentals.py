@@ -164,11 +164,11 @@ def test_get_stock_tickers_filters():
     from fundamentals import _get_stock_tickers
 
     _seed_holding("AAPL", "long_term")
-    _seed_holding("XAG", "short_term")  # commodity → excluded
+    _seed_holding("XAG", "short_term")  # commodity → now included
     _seed_holding("BOND1", "bond")  # bond pool → excluded
     tickers = _get_stock_tickers()
     assert "AAPL" in tickers
-    assert "XAG" not in tickers
+    assert "XAG" in tickers
     assert "BOND1" not in tickers
 
 

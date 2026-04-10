@@ -1,5 +1,6 @@
 """Database initialization and connection management for WealthAgent."""
 
+import contextlib
 import json
 import sqlite3
 from collections.abc import Generator
@@ -147,6 +148,9 @@ class ScreenerCandidate(BaseModel):
     country: str | None = None
     llm_score: float | None = Field(None, ge=0.0, le=10.0)
     llm_thesis: str | None = None
+    llm_risk: str | None = None
+    dividend_yield: float | None = None
+    debt_to_equity: float | None = None
     status: str = "pending"  # pending | reviewed | added | rejected
 
 
@@ -331,6 +335,16 @@ def init_db() -> None:
         # executescript issues an implicit COMMIT before running, so DDL is
         # safe even inside an open transaction.
         conn.executescript(_SCHEMA)
+
+        # Migrate: add optional columns to screener_candidates
+        for col, col_type in [
+            ("llm_risk", "TEXT"),
+            ("dividend_yield", "REAL"),
+            ("debt_to_equity", "REAL"),
+        ]:
+            with contextlib.suppress(sqlite3.OperationalError):
+                conn.execute(f"ALTER TABLE screener_candidates ADD COLUMN {col} {col_type}")
+
         conn.execute(
             "INSERT OR IGNORE INTO tax_year (year, realized_gains_eur, exemption_used)"
             " VALUES (?, 0, 0)",
