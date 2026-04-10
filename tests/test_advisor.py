@@ -10,6 +10,20 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
+def test_prompt_path_structure():
+    """_PROMPT_PATH must be a sibling config/ directory next to advisor.py itself.
+
+    In the container advisor.py sits at /app/advisor.py and config/ at
+    /app/config/, so the path must be computed with one parent level, not two.
+    """
+    from pathlib import Path
+
+    import advisor
+
+    expected = Path(advisor.__file__).resolve().parent / "config" / "investment_prompt.txt"
+    assert expected == advisor._PROMPT_PATH
+
+
 def test_load_system_prompt_from_file(tmp_path):
     import advisor
 

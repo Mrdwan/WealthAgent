@@ -3,7 +3,8 @@
     "allow": [
       "Bash(uv sync:*)",
       "Bash(uv run:*)",
-      "Bash(uv lock:*)"
+      "Bash(uv lock:*)",
+      "Bash(docker compose:*)"
     ]
   }
 }

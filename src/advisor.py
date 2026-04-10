@@ -26,7 +26,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-_PROMPT_PATH = Path(__file__).resolve().parent.parent / "config" / "investment_prompt.txt"
+_PROMPT_PATH = Path(__file__).resolve().parent / "config" / "investment_prompt.txt"
 
 _FALLBACK_SYSTEM_PROMPT = (
     "You are a disciplined investment advisor for a European retail investor. "

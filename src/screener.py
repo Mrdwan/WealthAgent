@@ -72,7 +72,7 @@ def screen_us_stocks() -> list[str]:
                 "Market Cap.": "+Small (over $300mln)",
                 "EPS growththis year": "Over 15%",
                 "EPS growthnext 5 years": "Over 15%",
-                "Return on Equity": "Over 15%",
+                "Return on Equity": "Over +15%",
                 "Current Ratio": "Over 1",
             },
         )
