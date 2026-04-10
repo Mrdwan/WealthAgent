@@ -30,7 +30,7 @@ services:
         condition: service_healthy
     volumes:
       - ./data:/app/data
-      - ./config:/app/config
+      - ./config:/app/config:ro
       - ./logs:/app/logs
     env_file:
       - .env
