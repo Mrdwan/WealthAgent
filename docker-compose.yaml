@@ -9,8 +9,17 @@ services:
       - ollama_data:/root/.ollama
     networks:
       - wealthnet
+    deploy:
+      resources:
+        limits:
+          cpus: "3.0"
+          memory: 12g # just for the PI 16GB model, adjust if using a smaller/bigger one
     healthcheck:
       test: ["CMD-SHELL", "ollama list | grep -q ${OLLAMA_MODEL:-gemma4:e4b} || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
 
   wealthagent:
     build: .
