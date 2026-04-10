@@ -27,9 +27,6 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-_OLLAMA_BASE_URL: str = settings.ollama_base_url
-_OLLAMA_MODEL: str = settings.ollama_model
-_OLLAMA_TIMEOUT: int = settings.ollama_timeout
 _RETRY_ATTEMPTS = 3
 _RETRY_DELAY = 10  # seconds between retries on connection error
 
@@ -71,12 +68,12 @@ def _post_to_ollama(payload: dict) -> str:
     Retries up to _RETRY_ATTEMPTS times on connection errors with _RETRY_DELAY
     seconds between attempts.
     """
-    url = f"{_OLLAMA_BASE_URL}/v1/chat/completions"
+    url = f"{settings.ollama_base_url}/v1/chat/completions"
     last_exc: Exception | None = None
 
     for attempt in range(_RETRY_ATTEMPTS):
         try:
-            resp = requests.post(url, json=payload, timeout=_OLLAMA_TIMEOUT)
+            resp = requests.post(url, json=payload, timeout=settings.ollama_timeout)
             resp.raise_for_status()
             return resp.json()["choices"][0]["message"]["content"]
         except requests.exceptions.ConnectionError as exc:
@@ -94,7 +91,7 @@ def _post_to_ollama(payload: dict) -> str:
                 raise
         except requests.exceptions.Timeout as exc:
             raise TimeoutError(
-                f"Ollama timed out after {_OLLAMA_TIMEOUT}s — "
+                f"Ollama timed out after {settings.ollama_timeout}s — "
                 "set OLLAMA_TIMEOUT env var to increase"
             ) from exc
 
@@ -149,7 +146,7 @@ def call_ollama(article_text: str, temperature: float = 0.1) -> ExtractedSignal:
     truncated = article_text[:_MAX_ARTICLE_CHARS]
 
     payload: dict = {
-        "model": _OLLAMA_MODEL,
+        "model": settings.ollama_model,
         "temperature": temperature,
         "messages": [
             {"role": "system", "content": _SYSTEM_PROMPT},

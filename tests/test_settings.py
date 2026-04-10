@@ -1,44 +1,161 @@
-"""Unit tests for config/settings.py — module-level validation error paths."""
+"""Unit tests for config/settings.py (pydantic-settings)."""
 
-import importlib
-import os
+from pathlib import Path
 
-import pytest
-
-
-def test_settings_module_level_missing_vars(tmp_path, monkeypatch):
-    """Reload with missing required vars triggers OSError with 'Missing required variables'.
-
-    Uses tmp_path as cwd so pydantic-settings doesn't read .env from the project root.
-    """
-    import config.settings as settings_mod
-
-    monkeypatch.chdir(tmp_path)
-
-    saved = {}
-    for key in ("TIINGO_API_KEY", "ANTHROPIC_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
-        saved[key] = os.environ.pop(key, None)
-
-    try:
-        with pytest.raises(OSError, match="Missing required variables"):
-            importlib.reload(settings_mod)
-    finally:
-        for key, val in saved.items():
-            if val is not None:
-                os.environ[key] = val
-        importlib.reload(settings_mod)
+# --- Settings defaults ---
 
 
-def test_settings_module_level_invalid_values(tmp_path, monkeypatch):
-    """Reload with an invalid float value triggers OSError with 'Invalid values'."""
-    import config.settings as settings_mod
+def test_settings_defaults(monkeypatch):
+    """Settings with no env vars gives sensible defaults."""
+    monkeypatch.delenv("DB_PATH", raising=False)
+    monkeypatch.delenv("TIINGO_API_KEY", raising=False)
+    monkeypatch.delenv("OLLAMA_TIMEOUT", raising=False)
 
-    monkeypatch.chdir(tmp_path)
-    os.environ["MONTHLY_BUDGET_EUR"] = "not-a-number"
+    from config.settings import Settings
 
-    try:
-        with pytest.raises(OSError, match="Invalid values"):
-            importlib.reload(settings_mod)
-    finally:
-        os.environ.pop("MONTHLY_BUDGET_EUR", None)
-        importlib.reload(settings_mod)
+    s = Settings()
+    assert s.db_path == Path("/app/data/wealthagent.db")
+    assert s.tiingo_api_key is None
+    assert s.ollama_timeout == 300
+    assert len(s.rss_feeds) > 0
+
+
+def test_settings_custom_values():
+    """Settings can be constructed with explicit keyword values."""
+    from config.settings import Settings
+
+    s = Settings(tiingo_api_key="my-key", ollama_timeout=60)
+    assert s.tiingo_api_key == "my-key"
+    assert s.ollama_timeout == 60
+
+
+# --- Env var loading (automatic via pydantic-settings) ---
+
+
+def test_settings_reads_env(monkeypatch):
+    """Settings automatically reads env vars."""
+    monkeypatch.setenv("TIINGO_API_KEY", "from-env")
+    monkeypatch.setenv("OLLAMA_TIMEOUT", "120")
+
+    from config.settings import Settings
+
+    s = Settings()
+    assert s.tiingo_api_key == "from-env"
+    assert s.ollama_timeout == 120
+
+
+def test_settings_defaults_when_unset(monkeypatch):
+    """Unset env vars fall back to field defaults."""
+    monkeypatch.delenv("TIINGO_API_KEY", raising=False)
+
+    from config.settings import Settings
+
+    s = Settings()
+    assert s.tiingo_api_key is None
+    assert s.ollama_base_url == "http://ollama:11434"
+
+
+# --- parse_rss_feeds (pure function) ---
+
+
+def test_parse_rss_feeds_empty():
+    """Empty string returns the default feed list."""
+    from config.settings import parse_rss_feeds
+
+    feeds = parse_rss_feeds("")
+    assert len(feeds) > 0
+
+
+def test_parse_rss_feeds_json():
+    """JSON array is parsed correctly."""
+    from config.settings import parse_rss_feeds
+
+    feeds = parse_rss_feeds('["https://a.com", "https://b.com"]')
+    assert feeds == ["https://a.com", "https://b.com"]
+
+
+def test_parse_rss_feeds_json_non_list():
+    """JSON that parses but isn't a list falls through to CSV split."""
+    from config.settings import parse_rss_feeds
+
+    feeds = parse_rss_feeds('{"not": "a list"}')
+    assert len(feeds) > 0
+
+
+def test_parse_rss_feeds_csv():
+    """Comma-separated URLs are split correctly."""
+    from config.settings import parse_rss_feeds
+
+    feeds = parse_rss_feeds("https://a.com, https://b.com")
+    assert feeds == ["https://a.com", "https://b.com"]
+
+
+def test_parse_rss_feeds_invalid_json_falls_to_csv():
+    """Malformed JSON falls through to CSV split."""
+    from config.settings import parse_rss_feeds
+
+    feeds = parse_rss_feeds("{bad json, https://a.com")
+    assert "https://a.com" in feeds
+
+
+# --- RSS_FEEDS env var integration ---
+
+
+def test_rss_feeds_empty_env_uses_defaults(monkeypatch):
+    """Empty RSS_FEEDS env var is ignored; defaults are used."""
+    monkeypatch.setenv("RSS_FEEDS", "")
+
+    from config.settings import Settings
+
+    s = Settings()
+    assert len(s.rss_feeds) > 0
+
+
+def test_rss_feeds_unset_env_uses_defaults(monkeypatch):
+    """Absent RSS_FEEDS env var uses defaults."""
+    monkeypatch.delenv("RSS_FEEDS", raising=False)
+
+    from config.settings import Settings
+
+    s = Settings()
+    assert len(s.rss_feeds) > 0
+
+
+def test_rss_feeds_json_env(monkeypatch):
+    """RSS_FEEDS env var with JSON array works end-to-end."""
+    monkeypatch.setenv("RSS_FEEDS", '["https://a.com", "https://b.com"]')
+
+    from config.settings import Settings
+
+    s = Settings()
+    assert s.rss_feeds == ["https://a.com", "https://b.com"]
+
+
+def test_rss_feeds_csv_env(monkeypatch):
+    """RSS_FEEDS env var with comma-separated URLs works end-to-end."""
+    monkeypatch.setenv("RSS_FEEDS", "https://a.com, https://b.com")
+
+    from config.settings import Settings
+
+    s = Settings()
+    assert s.rss_feeds == ["https://a.com", "https://b.com"]
+
+
+def test_rss_feeds_json_non_list_env(monkeypatch):
+    """RSS_FEEDS env var with non-list JSON falls to CSV split."""
+    monkeypatch.setenv("RSS_FEEDS", '{"not": "a list"}')
+
+    from config.settings import Settings
+
+    s = Settings()
+    assert len(s.rss_feeds) > 0
+
+
+def test_rss_feeds_invalid_json_env(monkeypatch):
+    """RSS_FEEDS env var with broken JSON falls to CSV split."""
+    monkeypatch.setenv("RSS_FEEDS", "{bad json, https://a.com")
+
+    from config.settings import Settings
+
+    s = Settings()
+    assert "https://a.com" in s.rss_feeds

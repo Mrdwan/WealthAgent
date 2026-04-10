@@ -1,19 +1,14 @@
 """Database initialization and connection management for WealthAgent."""
 
 import json
-import os
 import sqlite3
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import date, datetime
-from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-# Read directly from env to avoid importing config.settings (which validates API keys).
-# This allows init_db() to run without TIINGO_API_KEY etc. being set.
-_DB_PATH: Path = Path(os.environ.get("DB_PATH", "/app/data/wealthagent.db"))
-
+from config.settings import settings
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -171,15 +166,10 @@ class AlertLog(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def get_db_path() -> Path:
-    """Return the configured database path."""
-    return _DB_PATH
-
-
 def get_conn() -> sqlite3.Connection:
     """Open and return a WAL-mode SQLite connection with foreign keys enabled."""
-    _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(_DB_PATH)
+    settings.db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(settings.db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -353,4 +343,4 @@ def init_db() -> None:
 
 if __name__ == "__main__":
     init_db()
-    print(f"Database initialized at {_DB_PATH}")
+    print(f"Database initialized at {settings.db_path}")

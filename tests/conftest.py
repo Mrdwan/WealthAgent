@@ -4,22 +4,18 @@ import os
 import tempfile
 
 # ---------------------------------------------------------------------------
-# Bootstrap — must run before any project imports
+# Bootstrap — point DB at a temp file before any project imports.
+# No API key stubs needed — settings doesn't validate on import.
 # ---------------------------------------------------------------------------
 _tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 os.environ["DB_PATH"] = _tmp_db.name
 
-for _key, _val in {
-    "TIINGO_API_KEY": "test-key",
-    "ANTHROPIC_API_KEY": "test-key",
-    "TELEGRAM_BOT_TOKEN": "test-token",
-    "TELEGRAM_CHAT_ID": "0",
-}.items():
-    os.environ.setdefault(_key, _val)
-
 import pytest  # noqa: E402
 
 from db import get_conn, init_db  # noqa: E402
+
+# Create tables once at import time so the autouse fixture can DELETE safely.
+init_db()
 
 
 @pytest.fixture(autouse=True)
@@ -43,5 +39,4 @@ def _fresh_db():
         conn.commit()
     finally:
         conn.close()
-    init_db()
     yield

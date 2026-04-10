@@ -7,6 +7,7 @@ from unittest import mock
 import pytest
 
 from alert_engine import Alert
+from config.settings import settings
 
 # --- _get_credentials ---
 
@@ -14,8 +15,8 @@ from alert_engine import Alert
 def test_get_credentials_set(monkeypatch):
     from notifier import _get_credentials
 
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tok123")
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "456")
+    monkeypatch.setattr(settings, "telegram_bot_token", "tok123")
+    monkeypatch.setattr(settings, "telegram_chat_id", "456")
     token, chat_id = _get_credentials()
     assert token == "tok123"
     assert chat_id == "456"
@@ -24,8 +25,8 @@ def test_get_credentials_set(monkeypatch):
 def test_get_credentials_not_set(monkeypatch):
     from notifier import _get_credentials
 
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
-    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.setattr(settings, "telegram_bot_token", None)
+    monkeypatch.setattr(settings, "telegram_chat_id", None)
     token, chat_id = _get_credentials()
     assert token is None
     assert chat_id is None
@@ -55,7 +56,6 @@ def test_split_message_newline_split():
     """Long message with newlines splits on newline boundary."""
     from notifier import _split_message
 
-    # Build a message > 4096 chars with newlines
     msg = "\n".join([f"Line {i:04d} padding text here" for i in range(200)])
     assert len(msg) > 4096
     chunks = _split_message(msg)
@@ -66,7 +66,6 @@ def test_split_message_trailing_newlines():
     """Text that ends exactly at boundary + newlines → while loop exits via falsy text."""
     from notifier import _split_message
 
-    # 4096 chars of content + trailing newline → after split, remaining is "\n" → lstrip → ""
     msg = "A" * 4096 + "\n"
     chunks = _split_message(msg)
     assert len(chunks) == 1 or all(len(c) <= 4096 for c in chunks)
@@ -78,7 +77,7 @@ def test_split_message_trailing_newlines():
 def test_send_message_no_token(monkeypatch, capsys):
     from notifier import send_message
 
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.setattr(settings, "telegram_bot_token", None)
     send_message("Hello test")
     assert "Hello test" in capsys.readouterr().out
 
@@ -86,8 +85,8 @@ def test_send_message_no_token(monkeypatch, capsys):
 def test_send_message_with_token(monkeypatch):
     from notifier import send_message
 
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tok123")
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "456")
+    monkeypatch.setattr(settings, "telegram_bot_token", "tok123")
+    monkeypatch.setattr(settings, "telegram_chat_id", "456")
     resp = mock.MagicMock()
     resp.raise_for_status = mock.MagicMock()
     with mock.patch("notifier.requests.post", return_value=resp) as mock_post:
@@ -102,8 +101,8 @@ def test_send_message_failure(monkeypatch):
 
     from notifier import send_message
 
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tok123")
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "456")
+    monkeypatch.setattr(settings, "telegram_bot_token", "tok123")
+    monkeypatch.setattr(settings, "telegram_chat_id", "456")
     with (
         mock.patch(
             "notifier.requests.post",
@@ -202,7 +201,7 @@ def test_format_alert_unknown_type():
 def test_send_alert(monkeypatch, capsys):
     from notifier import send_alert
 
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.setattr(settings, "telegram_bot_token", None)
     alert = Alert(
         type="price_drop",
         ticker="TSLA",
@@ -229,7 +228,7 @@ def test_main_with_args(monkeypatch, capsys):
     import notifier
 
     monkeypatch.setattr(sys, "argv", ["notifier", "Hello", "World"])
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.setattr(settings, "telegram_bot_token", None)
     notifier.main()
     out = capsys.readouterr().out
     assert "Hello World" in out

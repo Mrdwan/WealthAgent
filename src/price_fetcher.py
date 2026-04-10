@@ -11,12 +11,12 @@ CLI usage (inside the container):
 """
 
 import logging
-import os
 from datetime import date
 
 import requests
 import yfinance as yf
 
+from config.settings import settings
 from db import PricePoint, db_conn, get_conn
 from fx_fetcher import fetch_ecb_rates, get_rate_for_date
 
@@ -44,7 +44,7 @@ _COMMODITY_MAP: dict[str, str] = {
 
 def _tiingo_headers() -> dict[str, str]:
     """Return Tiingo auth headers.  Raises if API key is missing."""
-    key = os.environ.get("TIINGO_API_KEY", "")
+    key = settings.tiingo_api_key
     if not key:
         raise OSError("TIINGO_API_KEY is not set")
     return {

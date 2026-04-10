@@ -1,15 +1,10 @@
-"""Unit tests for db.py — covers get_db_path, tickers_json, db_conn rollback."""
+"""Unit tests for db.py — covers tickers_json and db_conn rollback."""
 
 import json
 
 import pytest
 
-from db import NewsSignal, db_conn, get_conn, get_db_path, init_db
-
-
-def test_get_db_path():
-    path = get_db_path()
-    assert path.suffix == ".db"
+from db import NewsSignal, db_conn, get_conn, init_db
 
 
 def test_tickers_json():

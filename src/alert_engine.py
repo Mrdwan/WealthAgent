@@ -11,12 +11,12 @@ CLI usage (inside the container):
 
 import json
 import logging
-import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel
 
+from config.settings import settings
 from db import db_conn, get_conn
 
 logging.basicConfig(
@@ -24,8 +24,6 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 log = logging.getLogger(__name__)
-
-_ALERT_DROP_PCT: float = float(os.environ.get("ALERT_DROP_PCT", "10.0"))
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +69,7 @@ def check_price_drops(threshold_pct: float | None = None) -> list[Alert]:
     Returns:
         List of Alert objects for each ticker exceeding the threshold.
     """
-    threshold = threshold_pct if threshold_pct is not None else _ALERT_DROP_PCT
+    threshold = threshold_pct if threshold_pct is not None else settings.alert_drop_pct
     tickers = _get_held_tickers()
     alerts: list[Alert] = []
 

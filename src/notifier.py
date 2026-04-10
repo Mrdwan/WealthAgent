@@ -8,12 +8,12 @@ CLI usage (inside the container):
 """
 
 import logging
-import os
 import sys
 
 import requests
 
 from alert_engine import Alert
+from config.settings import settings
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,8 +35,8 @@ _ALERT_EMOJI: dict[str, str] = {
 
 def _get_credentials() -> tuple[str | None, str | None]:
     """Return (bot_token, chat_id) from environment, or (None, None) if not set."""
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip() or None
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip() or None
+    token = (settings.telegram_bot_token or "").strip() or None
+    chat_id = (settings.telegram_chat_id or "").strip() or None
     return token, chat_id
 
 

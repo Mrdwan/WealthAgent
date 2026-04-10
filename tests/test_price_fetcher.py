@@ -5,6 +5,7 @@ from unittest import mock
 
 import pytest
 
+from config.settings import settings
 from db import PricePoint, db_conn
 
 
@@ -33,7 +34,7 @@ def _seed_price(ticker: str, dt: str, usd: float | None, eur: float | None) -> N
 def test_tiingo_headers_no_key(monkeypatch):
     from price_fetcher import _tiingo_headers
 
-    monkeypatch.setenv("TIINGO_API_KEY", "")
+    monkeypatch.setattr(settings, "tiingo_api_key", None)
     with pytest.raises(OSError, match="TIINGO_API_KEY is not set"):
         _tiingo_headers()
 
@@ -41,7 +42,7 @@ def test_tiingo_headers_no_key(monkeypatch):
 def test_tiingo_headers_with_key(monkeypatch):
     from price_fetcher import _tiingo_headers
 
-    monkeypatch.setenv("TIINGO_API_KEY", "abc123")
+    monkeypatch.setattr(settings, "tiingo_api_key", "abc123")
     headers = _tiingo_headers()
     assert "Token abc123" in headers["Authorization"]
 
@@ -52,7 +53,7 @@ def test_tiingo_headers_with_key(monkeypatch):
 def test_fetch_tiingo_price_success(monkeypatch):
     import price_fetcher
 
-    monkeypatch.setenv("TIINGO_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "tiingo_api_key", "test-key")
     resp = mock.MagicMock()
     resp.json.return_value = [{"last": 150.5}]
     with mock.patch.object(price_fetcher.requests, "get", return_value=resp):
@@ -62,7 +63,7 @@ def test_fetch_tiingo_price_success(monkeypatch):
 def test_fetch_tiingo_price_empty_data(monkeypatch):
     import price_fetcher
 
-    monkeypatch.setenv("TIINGO_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "tiingo_api_key", "test-key")
     resp = mock.MagicMock()
     resp.json.return_value = []
     with mock.patch.object(price_fetcher.requests, "get", return_value=resp):
@@ -72,7 +73,7 @@ def test_fetch_tiingo_price_empty_data(monkeypatch):
 def test_fetch_tiingo_price_dict_response(monkeypatch):
     import price_fetcher
 
-    monkeypatch.setenv("TIINGO_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "tiingo_api_key", "test-key")
     resp = mock.MagicMock()
     resp.json.return_value = {"last": 150.5}
     with mock.patch.object(price_fetcher.requests, "get", return_value=resp):
@@ -82,7 +83,7 @@ def test_fetch_tiingo_price_dict_response(monkeypatch):
 def test_fetch_tiingo_price_tngo_last(monkeypatch):
     import price_fetcher
 
-    monkeypatch.setenv("TIINGO_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "tiingo_api_key", "test-key")
     resp = mock.MagicMock()
     resp.json.return_value = [{"tngoLast": 150.5}]
     with mock.patch.object(price_fetcher.requests, "get", return_value=resp):
@@ -92,7 +93,7 @@ def test_fetch_tiingo_price_tngo_last(monkeypatch):
 def test_fetch_tiingo_price_close_field(monkeypatch):
     import price_fetcher
 
-    monkeypatch.setenv("TIINGO_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "tiingo_api_key", "test-key")
     resp = mock.MagicMock()
     resp.json.return_value = [{"close": 150.5}]
     with mock.patch.object(price_fetcher.requests, "get", return_value=resp):
@@ -102,7 +103,7 @@ def test_fetch_tiingo_price_close_field(monkeypatch):
 def test_fetch_tiingo_price_no_field(monkeypatch):
     import price_fetcher
 
-    monkeypatch.setenv("TIINGO_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "tiingo_api_key", "test-key")
     resp = mock.MagicMock()
     resp.json.return_value = [{"ticker": "AAPL"}]  # no price field
     with mock.patch.object(price_fetcher.requests, "get", return_value=resp):
@@ -112,7 +113,7 @@ def test_fetch_tiingo_price_no_field(monkeypatch):
 def test_fetch_tiingo_price_exception(monkeypatch):
     import price_fetcher
 
-    monkeypatch.setenv("TIINGO_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "tiingo_api_key", "test-key")
     with mock.patch.object(price_fetcher.requests, "get", side_effect=Exception("err")):
         assert price_fetcher.fetch_tiingo_price("AAPL") is None
 
@@ -196,7 +197,7 @@ def test_fetch_price_commodity_failure():
 def test_fetch_price_tiingo_success(monkeypatch):
     import price_fetcher
 
-    monkeypatch.setenv("TIINGO_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "tiingo_api_key", "test-key")
     resp = mock.MagicMock()
     resp.json.return_value = [{"last": 150.5}]
     with mock.patch.object(price_fetcher.requests, "get", return_value=resp):
@@ -208,7 +209,7 @@ def test_fetch_price_tiingo_success(monkeypatch):
 def test_fetch_price_fallback_yfinance(monkeypatch):
     import price_fetcher
 
-    monkeypatch.setenv("TIINGO_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "tiingo_api_key", "test-key")
     tk = mock.MagicMock()
     tk.fast_info.last_price = 145.0
     with (
@@ -223,7 +224,7 @@ def test_fetch_price_fallback_yfinance(monkeypatch):
 def test_fetch_price_both_fail(monkeypatch):
     import price_fetcher
 
-    monkeypatch.setenv("TIINGO_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "tiingo_api_key", "test-key")
     with (
         mock.patch.object(price_fetcher.requests, "get", side_effect=Exception("down")),
         mock.patch.object(price_fetcher.yf, "Ticker", side_effect=Exception("down")),

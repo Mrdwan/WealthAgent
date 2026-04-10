@@ -26,16 +26,6 @@ from pathlib import Path
 _tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 os.environ["DB_PATH"] = _tmp_db.name
 
-# settings validates required keys on import; provide stubs so tests that
-# don't touch the real APIs can still import news_extractor etc.
-for _key, _val in {
-    "TIINGO_API_KEY": "test",
-    "ANTHROPIC_API_KEY": "test",
-    "TELEGRAM_BOT_TOKEN": "test",
-    "TELEGRAM_CHAT_ID": "0",
-}.items():
-    os.environ.setdefault(_key, _val)
-
 # Make both /app (container) and src/ (local dev) importable
 _app_dir = Path("/app")
 _src_dir = Path(__file__).resolve().parent.parent / "src"
@@ -487,7 +477,10 @@ def test_notifier() -> None:
     print("\n=== Notifier ===")
 
     # Ensure no real Telegram calls by unsetting token
-    original_token = os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+    from config.settings import settings as _settings  # noqa: PLC0415
+
+    original_token = _settings.telegram_bot_token
+    _settings.telegram_bot_token = None
     try:
         # send_message should print to stdout when token is absent
         raised = False
@@ -564,8 +557,7 @@ def test_notifier() -> None:
         check("send_alert (no token) completes without error", not raised2)
 
     finally:
-        if original_token is not None:
-            os.environ["TELEGRAM_BOT_TOKEN"] = original_token
+        _settings.telegram_bot_token = original_token
 
 
 # ---------------------------------------------------------------------------

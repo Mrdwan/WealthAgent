@@ -1,30 +1,25 @@
 """Application settings for WealthAgent.
 
-All values are read from environment variables (or a .env file).
+All values come from environment variables (with sensible defaults).
+A ``.env`` file in the project root is loaded automatically if present.
 
-Module-level constants (DB_PATH, LOG_DIR) are always safe to import — they
-carry no API-key dependency.  The ``settings`` singleton at the bottom
-validates every required variable on import; any module that needs API keys
-should import ``settings`` directly.
-
-db.py intentionally does *not* import from this module so that ``init_db()``
-can run without TIINGO_API_KEY / ANTHROPIC_API_KEY being present.
+API keys are ``None`` when not set — each consumer validates at point of use.
+This means ``from config.settings import settings`` is always safe to import.
 """
 
-import os
+import json
 from pathlib import Path
+from typing import Any
 
-from pydantic import Field, ValidationError
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic.fields import FieldInfo
+from pydantic_settings import (
+    BaseSettings,
+    EnvSettingsSource,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
-# ---------------------------------------------------------------------------
-# Always-available constants (no API-key validation)
-# ---------------------------------------------------------------------------
-
-DB_PATH: Path = Path(os.environ.get("DB_PATH", "/app/data/wealthagent.db"))
-LOG_DIR: Path = Path(os.environ.get("LOG_DIR", "/app/logs"))
-
-_DEFAULT_RSS_FEEDS: list[str] = [
+DEFAULT_RSS_FEEDS: list[str] = [
     # Yahoo Finance S&P 500
     "https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US",
     # CNBC – top news and markets
@@ -40,72 +35,92 @@ _DEFAULT_RSS_FEEDS: list[str] = [
     "https://www.investing.com/rss/news_25.rss",
 ]
 
-# ---------------------------------------------------------------------------
-# Settings model
-# ---------------------------------------------------------------------------
+
+def parse_rss_feeds(raw: str) -> list[str]:
+    """Parse an RSS_FEEDS string — accepts JSON array or comma-separated URLs."""
+    if not raw:
+        return DEFAULT_RSS_FEEDS.copy()
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(u) for u in parsed]
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return [u.strip() for u in raw.split(",") if u.strip()]
+
+
+class _RssAwareEnvSource(EnvSettingsSource):
+    """Env source that normalises RSS_FEEDS to a JSON array before decoding."""
+
+    def prepare_field_value(
+        self,
+        field_name: str,
+        field: FieldInfo,
+        value: Any,
+        value_is_complex: bool,
+    ) -> Any:
+        """Pre-process rss_feeds so CSV strings survive JSON decoding."""
+        if field_name == "rss_feeds" and isinstance(value, str):
+            urls = parse_rss_feeds(value)
+            encoded = json.dumps(urls)
+            return super().prepare_field_value(field_name, field, encoded, value_is_complex)
+        return super().prepare_field_value(field_name, field, value, value_is_complex)
 
 
 class Settings(BaseSettings):
-    """Full runtime configuration.  Required fields raise on instantiation if absent."""
+    """Runtime configuration.  API keys are None when not set."""
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-        case_sensitive=False,
-    )
+    model_config = SettingsConfigDict(env_ignore_empty=True)
 
-    # --- Required ----------------------------------------------------------------
-    tiingo_api_key: str
-    anthropic_api_key: str
-    telegram_bot_token: str
-    telegram_chat_id: str
+    # Storage
+    db_path: Path = Path("/app/data/wealthagent.db")
+    log_dir: Path = Path("/app/logs")
 
-    # --- LLM ---------------------------------------------------------------------
+    # API keys — validated at point of use, not here
+    tiingo_api_key: str | None = None
+    anthropic_api_key: str | None = None
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
+
+    # LLM
     ollama_base_url: str = "http://ollama:11434"
     ollama_model: str = "gemma4:e4b"
-    ollama_timeout: int = 300  # seconds; Pi 5 can take 60–150 s per article
+    ollama_timeout: int = 300
     opus_model: str = "claude-opus-4-6"
 
-    # --- Storage -----------------------------------------------------------------
-    db_path: Path = DB_PATH
-    log_dir: Path = LOG_DIR
-
-    # --- Portfolio ---------------------------------------------------------------
+    # Portfolio
     monthly_budget_eur: float = 2000.0
     long_term_pct: float = 0.75
     short_term_pct: float = 0.25
 
-    # --- Tax (Irish CGT defaults) ------------------------------------------------
+    # Tax (Irish CGT defaults)
     cgt_rate: float = 0.33
     annual_exemption: float = 1270.0
 
-    # --- Alert thresholds --------------------------------------------------------
-    alert_drop_pct: float = 10.0  # flag if price drops >N% in 30 days
-    stop_loss_pct: float = 8.0  # exit short-term position if drops >N%
-    dividend_yield_max: float = 2.0  # de-prioritise stocks above this yield
+    # Alert thresholds
+    alert_drop_pct: float = 10.0
+    stop_loss_pct: float = 8.0
+    dividend_yield_max: float = 2.0
 
-    # --- News feeds --------------------------------------------------------------
-    rss_feeds: list[str] = Field(default_factory=_DEFAULT_RSS_FEEDS.copy)
+    # News feeds
+    rss_feeds: list[str] = DEFAULT_RSS_FEEDS.copy()
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,  # noqa: ARG003
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Replace the default env source with one that handles CSV RSS_FEEDS."""
+        return (
+            init_settings,
+            _RssAwareEnvSource(settings_cls),
+            dotenv_settings,
+            file_secret_settings,
+        )
 
 
-# ---------------------------------------------------------------------------
-# Module-level validation — raises EnvironmentError with a clear message
-# ---------------------------------------------------------------------------
-
-try:
-    settings = Settings()
-except ValidationError as _exc:
-    _missing = [e["loc"][0].upper() for e in _exc.errors() if e.get("type") == "missing"]
-    _invalid = [
-        f"{e['loc'][0].upper()} ({e['msg']})" for e in _exc.errors() if e.get("type") != "missing"
-    ]
-
-    _lines: list[str] = ["WealthAgent: environment configuration error."]
-    if _missing:
-        _lines += ["", "Missing required variables:"] + [f"  • {v}" for v in _missing]
-    if _invalid:
-        _lines += ["", "Invalid values:"] + [f"  • {v}" for v in _invalid]
-    _lines += ["", "Copy .env.example → .env and fill in the missing values."]
-
-    raise OSError("\n".join(_lines)) from _exc
+settings = Settings()
