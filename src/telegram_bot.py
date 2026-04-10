@@ -29,10 +29,14 @@ _HELP_TEXT = """\
 WealthAgent commands:
 
 /status — portfolio summary
+/buy TICKER SHARES PRICE_EUR POOL — record a buy
+/sell TICKER SHARES PRICE_EUR — record a sell
 /rebalance — AI rebalance recommendations (30+ seconds)
 /analyze TICKER — deep analysis of a ticker (30+ seconds)
 /help — show this message\
 """
+
+_VALID_POOLS = {"long_term", "short_term", "bond"}
 
 # Thread pool for blocking LLM calls — limited to 2 workers to conserve Pi resources
 _executor = ThreadPoolExecutor(max_workers=2)
@@ -118,6 +122,101 @@ async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text(f"Analysis of {ticker} failed: {exc}")
 
 
+@_authorized_only
+async def cmd_buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /buy TICKER SHARES PRICE_EUR POOL — record a buy transaction."""
+    from datetime import date  # noqa: PLC0415
+
+    from db import db_conn  # noqa: PLC0415
+
+    if not context.args or len(context.args) < 4:
+        await update.message.reply_text("Usage: /buy TICKER SHARES PRICE_EUR POOL")
+        return
+
+    ticker = context.args[0].upper()
+    try:
+        shares = float(context.args[1])
+        price_eur = float(context.args[2])
+    except ValueError:
+        await update.message.reply_text("Invalid shares or price — must be numbers.")
+        return
+
+    pool = context.args[3].lower()
+    if pool not in _VALID_POOLS:
+        await update.message.reply_text(f"Invalid pool. Must be one of: {', '.join(_VALID_POOLS)}")
+        return
+
+    today = date.today().isoformat()
+    with db_conn() as conn:
+        # Record the trade
+        conn.execute(
+            """INSERT INTO trades (date, action, ticker, shares, price_eur, pool)
+               VALUES (?, 'buy', ?, ?, ?, ?)""",
+            (today, ticker, shares, price_eur, pool),
+        )
+        # Add holding (simplified: assumes new position each time)
+        conn.execute(
+            """INSERT INTO holdings (ticker, shares, entry_price_eur, entry_fx_rate,
+               purchase_date, pool) VALUES (?, ?, ?, 1.0, ?, ?)""",
+            (ticker, shares, price_eur, today, pool),
+        )
+
+    await update.message.reply_text(f"Bought {shares} {ticker} @ \u20ac{price_eur:.2f} ({pool})")
+
+
+@_authorized_only
+async def cmd_sell(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /sell TICKER SHARES PRICE_EUR — record a sell transaction."""
+    from datetime import date  # noqa: PLC0415
+
+    from db import db_conn  # noqa: PLC0415
+
+    if not context.args or len(context.args) < 3:
+        await update.message.reply_text("Usage: /sell TICKER SHARES PRICE_EUR")
+        return
+
+    ticker = context.args[0].upper()
+    try:
+        shares = float(context.args[1])
+        price_eur = float(context.args[2])
+    except ValueError:
+        await update.message.reply_text("Invalid shares or price — must be numbers.")
+        return
+
+    with db_conn() as conn:
+        # Check if holding exists
+        holding = conn.execute(
+            "SELECT id, shares FROM holdings WHERE ticker = ?", (ticker,)
+        ).fetchone()
+        if not holding:
+            await update.message.reply_text(f"No holding found for {ticker}.")
+            return
+
+        current_shares = holding["shares"]
+        if shares > current_shares:
+            await update.message.reply_text(
+                f"Insufficient shares. You own {current_shares} {ticker}."
+            )
+            return
+
+        today = date.today().isoformat()
+        # Record the trade
+        conn.execute(
+            """INSERT INTO trades (date, action, ticker, shares, price_eur)
+               VALUES (?, 'sell', ?, ?, ?)""",
+            (today, ticker, shares, price_eur),
+        )
+
+        # Update or remove holding
+        new_shares = current_shares - shares
+        if new_shares > 0:
+            conn.execute("UPDATE holdings SET shares = ? WHERE id = ?", (new_shares, holding["id"]))
+        else:
+            conn.execute("DELETE FROM holdings WHERE id = ?", (holding["id"],))
+
+    await update.message.reply_text(f"Sold {shares} {ticker} @ \u20ac{price_eur:.2f}")
+
+
 # ---------------------------------------------------------------------------
 # Scheduler
 # ---------------------------------------------------------------------------
@@ -171,6 +270,8 @@ def _build_application() -> Application | None:
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CommandHandler("buy", cmd_buy))
+    app.add_handler(CommandHandler("sell", cmd_sell))
     app.add_handler(CommandHandler("rebalance", cmd_rebalance))
     app.add_handler(CommandHandler("analyze", cmd_analyze))
     return app

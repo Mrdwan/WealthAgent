@@ -31,6 +31,25 @@ docker-compose
 
 ---
 
+## Telegram bot commands
+
+| Command | Usage | Description |
+|---------|-------|-------------|
+| `/status` | `/status` | Portfolio summary |
+| `/buy` | `/buy TICKER SHARES PRICE_EUR POOL` | Record a buy (pool: `long_term`, `short_term`, `bond`) |
+| `/sell` | `/sell TICKER SHARES PRICE_EUR` | Record a sell (updates holdings automatically) |
+| `/rebalance` | `/rebalance` | AI rebalance recommendations via Claude |
+| `/analyze` | `/analyze TICKER` | Deep analysis of a ticker via Claude |
+| `/help` | `/help` | Show available commands |
+
+Examples:
+```
+/buy AAPL 10 145.50 long_term
+/sell AAPL 5 160.00
+```
+
+---
+
 ## Design principles
 
 ### TDD — Test-Driven Development (mandatory)
