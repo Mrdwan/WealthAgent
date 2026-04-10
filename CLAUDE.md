@@ -161,9 +161,17 @@ Two kinds of tests:
 `conftest.py` bootstraps all tests: creates a temp SQLite DB, stubs required
 env vars, and provides an `autouse` fixture that cleans all tables between tests.
 
+Run tests inside Docker (the container entrypoint starts the bot, so override it):
+
 ```bash
-uv run pytest --cov --cov-branch --cov-report=term-missing
+# Default — Ollama integration tests skipped
+docker compose run --rm --entrypoint "" wealthagent python -m pytest --cov --cov-branch --cov-report=term-missing
+
+# Full run including live Ollama tests
+docker compose run --rm --entrypoint "" wealthagent python -m pytest --with-ollama
 ```
+
+Tests marked `@pytest.mark.ollama` require a live Ollama instance and are skipped by default.
 
 Coverage target: **100% line and branch** (`fail_under = 100` in `pyproject.toml`).
 Excluded: `if __name__` blocks, `TYPE_CHECKING` guards, `# pragma: no cover`.
@@ -171,8 +179,8 @@ When adding new source code, add corresponding unit tests to maintain 100%.
 
 ### Docker
 
-Docker-first project for runtime. The Dockerfile uses uv to install deps from
-the lockfile.
+Docker-first project for runtime. The Dockerfile installs all deps (including dev)
+from the lockfile.
 
 ```bash
 docker compose up --build                # build and start

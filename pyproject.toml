@@ -65,6 +65,9 @@ known-first-party = ["config"]
 "src/screener.py" = [
     "PLC0415", # lazy import of finvizfinance inside try/except (fragile, may not be installed)
 ]
+"src/telegram_bot.py" = [
+    "PLC0415", # lazy imports in handlers and scheduler functions are intentional
+]
 
 # ---------------------------------------------------------------------------
 # Pytest
@@ -72,6 +75,9 @@ known-first-party = ["config"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "."]
+markers = [
+    "ollama: requires a live Ollama instance — enable with --with-ollama",
+]
 
 # ---------------------------------------------------------------------------
 # Coverage

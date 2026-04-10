@@ -20,6 +20,8 @@ import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Bootstrap — must happen before any project imports
 # ---------------------------------------------------------------------------
@@ -220,6 +222,7 @@ def test_json_parser() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.ollama
 def test_call_ollama() -> None:
     """Test call_ollama with a real article (requires Ollama running)."""
     print("\n=== Ollama Integration (requires Ollama) ===")
@@ -286,6 +289,7 @@ def test_call_ollama() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.ollama
 def test_process_unprocessed() -> None:
     """Test process_unprocessed with a seeded article (requires Ollama)."""
     print("\n=== process_unprocessed (requires Ollama) ===")
