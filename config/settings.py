@@ -117,6 +117,12 @@ class Settings(BaseSettings):
     # Report retention
     report_retention_days: int = 90
 
+    # Pipeline data retention (4× the context-builder look-back windows)
+    news_retention_days: int = 28  # 4 × 7-day signal window
+    alerts_retention_days: int = 28  # 4 × 7-day alert window
+    screener_retention_days: int = 120  # 4 × monthly screener cycle
+    fundamentals_retention_days: int = 28  # 4 × weekly fetch cycle
+
     @classmethod
     def settings_customise_sources(
         cls,

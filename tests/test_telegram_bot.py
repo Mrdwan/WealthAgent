@@ -456,6 +456,22 @@ def test_cmd_analyze_unauthorized(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+def test_run_purge_pipeline_data_calls_purge_all(monkeypatch):
+    """_run_purge_pipeline_data calls purge_all and logs the result."""
+    import telegram_bot
+
+    mock_purge_all = mock.MagicMock(
+        return_value={"news": 2, "alerts": 1, "screener": 0, "fundamentals": 3}
+    )
+    with mock.patch.dict(
+        "sys.modules",
+        {"purge": mock.MagicMock(purge_all=mock_purge_all)},
+    ):
+        telegram_bot._run_purge_pipeline_data()
+
+    mock_purge_all.assert_called_once()
+
+
 def test_run_purge_reports_calls_purge_and_logs(monkeypatch):
     """_run_purge_reports calls purge_expired_reports and logs the count."""
     import telegram_bot
@@ -535,8 +551,11 @@ def test_monthly_check_skips_other_days(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_setup_schedule_registers_five_jobs():
-    """Registers exactly 5 scheduled jobs (hourly, daily, weekly, monthly-check, purge)."""
+def test_setup_schedule_registers_six_jobs():
+    """
+    Registers exactly 6 scheduled jobs
+    (hourly, daily, weekly, monthly-check, purge-reports, purge-data).
+    """
     import schedule
 
     import telegram_bot
@@ -544,7 +563,7 @@ def test_setup_schedule_registers_five_jobs():
     schedule.clear()
     try:
         telegram_bot._setup_schedule()
-        assert len(schedule.jobs) == 5
+        assert len(schedule.jobs) == 6
     finally:
         schedule.clear()
 

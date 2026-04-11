@@ -290,6 +290,14 @@ def _run_purge_reports() -> None:
     log.info("Purged %d expired reports", count)
 
 
+def _run_purge_pipeline_data() -> None:
+    """Purge old news, alerts, screener candidates, and fundamentals."""
+    from purge import purge_all  # noqa: PLC0415
+
+    counts = purge_all()
+    log.info("Pipeline data purge complete: %s", counts)
+
+
 def _setup_schedule() -> None:
     """Register all scheduled pipeline tasks."""
     from run_pipeline import cmd_daily, cmd_hourly, cmd_weekly  # noqa: PLC0415
@@ -299,6 +307,7 @@ def _setup_schedule() -> None:
     schedule.every().sunday.at("07:00").do(_safe_run, cmd_weekly, "weekly")
     schedule.every().day.at("08:00").do(_monthly_check)
     schedule.every().day.at("03:00").do(_run_purge_reports)
+    schedule.every().day.at("03:05").do(_run_purge_pipeline_data)
 
 
 def _run_scheduler_loop() -> None:

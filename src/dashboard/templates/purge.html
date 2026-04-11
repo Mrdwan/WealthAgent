@@ -30,4 +30,34 @@
 </article>
 
 </div>
+
+<article style="margin-top: 2rem;">
+    <header><strong>Purge Pipeline Data</strong></header>
+    <p>Delete old news articles, signals, alerts, screener candidates, and fundamentals snapshots. Defaults are 4× the advisor context windows. The most recent fundamentals snapshot per ticker is always preserved.</p>
+    {% if data_result %}
+    <p style="color: var(--pico-color-green-500);">{{ data_result }}</p>
+    {% endif %}
+    <form method="post" action="/purge/data">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <label>
+                News &amp; signals older than (days)
+                <input type="number" name="news_days" value="{{ news_retention_days }}" min="1" required>
+            </label>
+            <label>
+                Alerts older than (days)
+                <input type="number" name="alerts_days" value="{{ alerts_retention_days }}" min="1" required>
+            </label>
+            <label>
+                Screener candidates older than (days)
+                <input type="number" name="screener_days" value="{{ screener_retention_days }}" min="1" required>
+            </label>
+            <label>
+                Fundamentals snapshots older than (days)
+                <input type="number" name="fundamentals_days" value="{{ fundamentals_retention_days }}" min="1" required>
+            </label>
+        </div>
+        <button type="submit" class="secondary" style="margin-top: 1rem;">Delete Old Pipeline Data</button>
+    </form>
+</article>
+
 {% endblock %}

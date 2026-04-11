@@ -197,3 +197,55 @@ def test_purge_reports_none_expired(client):
     response = test_client.post("/purge/reports")
     assert response.status_code == 200
     assert "Deleted 0 expired reports." in response.text
+
+
+# ---------------------------------------------------------------------------
+# POST /purge/data — pipeline data deletion
+# ---------------------------------------------------------------------------
+
+
+def test_purge_data_action_requires_auth(unauth_client):
+    data = {
+        "news_days": "28",
+        "alerts_days": "28",
+        "screener_days": "120",
+        "fundamentals_days": "28",
+    }
+    response = unauth_client.post("/purge/data", data=data)
+    assert response.status_code == 302
+    assert "/login" in response.headers["location"]
+
+
+def test_purge_data_action_deletes_old_rows(client):
+    """Old news/alert/screener/fundamentals rows are deleted; result shown in response."""
+    from datetime import timedelta
+
+    test_client, _ = client
+    old_ts = (datetime.now() - timedelta(days=60)).isoformat()
+
+    with db_conn() as conn:
+        conn.execute(
+            "INSERT INTO news_articles (url, fetched_at, processed) VALUES (?, ?, 1)",
+            ("http://old.example.com", old_ts),
+        )
+        conn.execute(
+            "INSERT INTO alerts_log (triggered_at, ticker, alert_type) VALUES (?, ?, ?)",
+            (old_ts, "AAPL", "price_drop"),
+        )
+
+    data = {"news_days": "7", "alerts_days": "7", "screener_days": "120", "fundamentals_days": "28"}
+    response = test_client.post("/purge/data", data=data)
+    assert response.status_code == 200
+    assert "Deleted" in response.text
+    assert "news" in response.text
+
+
+def test_purge_data_action_clamps_minimum_to_1(client):
+    """days=0 inputs are clamped to 1 — no crash."""
+    test_client, _ = client
+    response = test_client.post(
+        "/purge/data",
+        data={"news_days": "0", "alerts_days": "0", "screener_days": "0", "fundamentals_days": "0"},
+    )
+    assert response.status_code == 200
+    assert "Deleted" in response.text
