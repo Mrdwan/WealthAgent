@@ -108,6 +108,15 @@ class Settings(BaseSettings):
     # News feeds
     rss_feeds: list[str] = DEFAULT_RSS_FEEDS.copy()
 
+    # Dashboard
+    dashboard_enabled: bool = True
+    dashboard_port: int = 8080
+    dashboard_secret_key: str | None = None
+    dashboard_base_url: str | None = None  # e.g. http://192.168.1.x:8080
+
+    # Report retention
+    report_retention_days: int = 90
+
     @classmethod
     def settings_customise_sources(
         cls,

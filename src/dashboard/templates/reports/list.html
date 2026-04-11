@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Reports — WealthAgent{% endblock %}
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    <h2>Reports</h2>
+    <small>{{ total }} report{% if total != 1 %}s{% endif %}</small>
+</div>
+
+{% if reports %}
+<figure>
+<table>
+    <thead>
+        <tr>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Ticker</th>
+            <th>Summary</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in reports %}
+        <tr>
+            <td><a href="/reports/{{ r.id }}">{{ r.created_at.strftime('%d %b %Y %H:%M') if r.created_at else '—' }}</a></td>
+            <td><mark>{{ r.report_type }}</mark></td>
+            <td>{{ r.ticker or '—' }}</td>
+            <td>{{ r.summary[:120] }}{% if r.summary|length > 120 %}…{% endif %}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+
+{% if total_pages > 1 %}
+<nav style="display: flex; gap: 1rem; justify-content: center;">
+    {% if page > 1 %}<a href="/reports?page={{ page - 1 }}" role="button" class="secondary outline">← Prev</a>{% endif %}
+    <span style="line-height: 2.5rem;">Page {{ page }} of {{ total_pages }}</span>
+    {% if page < total_pages %}<a href="/reports?page={{ page + 1 }}" role="button" class="secondary outline">Next →</a>{% endif %}
+</nav>
+{% endif %}
+
+{% else %}
+<p>No reports yet. Run <code>/rebalance</code> or <code>/analyze TICKER</code> in Telegram to generate one.</p>
+{% endif %}
+{% endblock %}

@@ -12,9 +12,10 @@ deep analysis, surfaced through a Telegram bot.
 docker-compose
 ├── ollama          # local LLM server (gemma4:e4b default)
 └── wealthagent
-    ├── entrypoint.py      → init_db() → validate settings → exec telegram_bot.py
+    ├── entrypoint.py      → init_db() → start dashboard subprocess → exec telegram_bot.py
     ├── telegram_bot.py    → bot handlers (commands, scheduled jobs)
     ├── db.py              → SQLite schema, Pydantic models, connection helpers
+    ├── reports.py         → save/get/list/purge LLM reports, Ollama summary generation
     ├── fx_fetcher.py      → ECB daily FX rates → fx_rates table
     ├── price_fetcher.py   → Tiingo + yfinance prices → price_history table
     ├── fundamentals.py    → yfinance fundamentals → fundamentals table
@@ -22,6 +23,16 @@ docker-compose
     ├── news_extractor.py  → Ollama extraction → news_signals table
     ├── alert_engine.py    → price/signal/opportunity checks → alerts_log table
     ├── notifier.py        → Telegram (or stdout) alert delivery
+    ├── dashboard/         → FastAPI web dashboard (port 8080)
+    │   ├── app.py         → FastAPI app factory, login/logout routes
+    │   ├── auth.py        → single-user cookie auth (itsdangerous)
+    │   ├── routes_reports.py  → GET /reports, GET /reports/{id}
+    │   ├── routes_logs.py     → GET /logs, GET /logs/{filename}
+    │   ├── routes_purge.py    → GET/POST /purge/logs, POST /purge/reports
+    │   ├── routes_charts.py   → GET /charts, GET /api/charts/*
+    │   ├── routes_alerts.py   → GET /alerts, GET/POST /alerts/config
+    │   ├── templates/     → Jinja2 templates (base, login, reports, logs, charts, alerts, purge)
+    │   └── static/        → vendored PicoCSS, HTMX, Chart.js, app.css
     └── config/
         └── settings.py    → pydantic-settings, all env vars
 ```
@@ -38,8 +49,8 @@ docker-compose
 | `/status` | `/status` | Portfolio summary |
 | `/buy` | `/buy TICKER SHARES PRICE_EUR POOL` | Record a buy (pool: `long_term`, `short_term`, `bond`) |
 | `/sell` | `/sell TICKER SHARES PRICE_EUR` | Record a sell (updates holdings automatically) |
-| `/rebalance` | `/rebalance` | AI rebalance recommendations via Claude |
-| `/analyze` | `/analyze TICKER` | Deep analysis of a ticker via Claude |
+| `/rebalance` | `/rebalance` | AI rebalance — sends summary + dashboard link |
+| `/analyze` | `/analyze TICKER` | Deep analysis — sends summary + dashboard link |
 | `/help` | `/help` | Show available commands |
 
 Examples:
@@ -47,6 +58,37 @@ Examples:
 /buy AAPL 10 145.50 long_term
 /sell AAPL 5 160.00
 ```
+
+`/rebalance` and `/analyze` now send a 2–3 sentence Ollama-generated summary to Telegram
+and save the full Claude report to the database, accessible via the dashboard.
+
+---
+
+## Web dashboard
+
+FastAPI dashboard runs on port 8080 alongside the bot (started via `subprocess.Popen`
+in `entrypoint.py` before `os.execv` to the bot).
+
+| Route | Description |
+|-------|-------------|
+| `GET /` | Redirects to `/reports` |
+| `GET /login` + `POST /login` | Single-user password auth (cookie session) |
+| `GET /reports` | Paginated list of saved LLM reports |
+| `GET /reports/{id}` | Full report rendered as markdown |
+| `GET /logs` | List of `DD-MM-YYYY.log` files |
+| `GET /logs/{filename}` | Line-numbered log file viewer |
+| `GET /purge` | Purge controls UI |
+| `POST /purge/logs` | Delete logs older than N days |
+| `POST /purge/reports` | Delete expired reports immediately |
+| `GET /charts` | Portfolio charts (value, P&L, allocation, tax year) |
+| `GET /api/charts/*` | JSON data endpoints for Chart.js |
+| `GET /alerts` | Recent alerts (last 30 days) |
+| `GET /alerts/config` + `POST` | Configure alert thresholds (stored in `alert_config` table) |
+
+### Dashboard design
+- **Frontend:** HTMX + Jinja2 + PicoCSS (dark theme). Static assets vendored — no CDN, works offline.
+- **Auth:** `itsdangerous.URLSafeTimedSerializer` signed cookie, 24h expiry, single password via `DASHBOARD_SECRET_KEY`.
+- **No Node.js build step** — plain HTML/CSS/JS only.
 
 ---
 
@@ -133,10 +175,11 @@ Every module, class, and function should have **one reason to change**.
   coverage gate) on every commit.
 
 ### LLM usage pattern
-- **Ollama (local):** news signal extraction, sentiment scoring, cheap repeated inference.
-  - Called via `/v1/chat/completions` with `response_format=json_schema`.
+- **Ollama (local):** news signal extraction, sentiment scoring, report summarization, cheap repeated inference.
+  - Called via `/v1/chat/completions` with `response_format=json_schema` (extraction) or plain text (summaries).
   - Retries up to 3× with 10 s delay on connection errors (Pi may be slow to start).
   - `ExtractedSignal` in `news_extractor.py` is the extraction schema — separate from `db.NewsSignal`.
+  - `reports.generate_summary()` uses Ollama to produce 2–3 sentence summaries of Claude reports.
 - **Claude API (`claude-opus-4-6`):** deep analysis, trade thesis, final decisions.
 - Never call Claude for tasks Ollama can handle adequately.
 
@@ -217,6 +260,17 @@ Run modules in the container: `docker compose exec wealthagent python -m <module
 ```bash
 cp .env.example .env
 # Fill in: TIINGO_API_KEY, ADVISOR_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+# Dashboard: DASHBOARD_SECRET_KEY, DASHBOARD_BASE_URL
 ```
 
 All other variables have sensible defaults — see `.env.example`.
+
+### Dashboard-specific env vars
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DASHBOARD_SECRET_KEY` | Yes | — | Login password for the dashboard |
+| `DASHBOARD_BASE_URL` | Recommended | `http://localhost:8080` | Full URL used in Telegram links (e.g. `http://192.168.1.x:8080`) |
+| `DASHBOARD_ENABLED` | No | `true` | Set to `false` to disable the dashboard |
+| `DASHBOARD_PORT` | No | `8080` | Port the dashboard listens on |
+| `REPORT_RETENTION_DAYS` | No | `90` | Days before reports are auto-purged |

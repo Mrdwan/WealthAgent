@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Alerts — WealthAgent{% endblock %}
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    <h2>Recent Alerts</h2>
+    <a href="/alerts/config" role="button" class="secondary outline">Configure Thresholds</a>
+</div>
+
+{% if alerts %}
+<figure>
+<table>
+    <thead>
+        <tr><th>Time</th><th>Type</th><th>Ticker</th><th>Details</th></tr>
+    </thead>
+    <tbody>
+        {% for a in alerts %}
+        <tr>
+            <td>{{ a.triggered_at[:16] if a.triggered_at else '—' }}</td>
+            <td><mark>{{ a.alert_type or '—' }}</mark></td>
+            <td>{{ a.ticker or '—' }}</td>
+            <td>{{ a.details or '—' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% else %}
+<p>No alerts in the last 30 days.</p>
+{% endif %}
+{% endblock %}

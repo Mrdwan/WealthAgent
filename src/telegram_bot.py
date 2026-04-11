@@ -99,24 +99,38 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 @_authorized_only
 async def cmd_rebalance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /rebalance — run advisor LLM and send rebalance recommendations."""
+    """Handle /rebalance — run advisor LLM, save report, and send summary with link."""
     from advisor import monthly_rebalance  # noqa: PLC0415
 
     log.info("cmd_rebalance: requested by chat_id=%s", update.effective_chat.id)
     await update.message.reply_text("Generating rebalance recommendations\u2026 (30+ seconds)")
     loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(_executor, monthly_rebalance)
-        log.info("cmd_rebalance: response ready (%d chars)", len(result))
-        await _send_long(update.message, result)
+        full_content = await loop.run_in_executor(_executor, monthly_rebalance)
+        log.info("cmd_rebalance: response ready (%d chars)", len(full_content))
     except Exception as exc:
         log.error("cmd_rebalance failed: %s", exc, exc_info=True)
         await update.message.reply_text(f"Rebalance failed: {exc}")
+        return
+
+    try:
+        from reports import get_report, save_report  # noqa: PLC0415
+
+        report_id = await loop.run_in_executor(
+            _executor, lambda: save_report("rebalance", full_content)
+        )
+        report = get_report(report_id)
+        base_url = settings.dashboard_base_url or f"http://localhost:{settings.dashboard_port}"
+        report_url = f"{base_url}/reports/{report_id}"
+        await update.message.reply_text(f"{report.summary}\n\nFull report: {report_url}")
+    except Exception as exc:
+        log.warning("cmd_rebalance: save_report failed, sending fallback: %s", exc)
+        await update.message.reply_text(full_content[:500])
 
 
 @_authorized_only
 async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /analyze TICKER — deep analysis of a ticker via advisor LLM."""
+    """Handle /analyze TICKER — deep analysis of a ticker, saved as report with summary link."""
     from advisor import analyze_opportunity  # noqa: PLC0415
 
     if not context.args:
@@ -128,12 +142,26 @@ async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text(f"Analyzing {ticker}\u2026 (30+ seconds)")
     loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(_executor, analyze_opportunity, ticker)
-        log.info("cmd_analyze: response ready for %s (%d chars)", ticker, len(result))
-        await _send_long(update.message, result)
+        full_content = await loop.run_in_executor(_executor, analyze_opportunity, ticker)
+        log.info("cmd_analyze: response ready for %s (%d chars)", ticker, len(full_content))
     except Exception as exc:
         log.error("cmd_analyze failed for %s: %s", ticker, exc, exc_info=True)
         await update.message.reply_text(f"Analysis of {ticker} failed: {exc}")
+        return
+
+    try:
+        from reports import get_report, save_report  # noqa: PLC0415
+
+        report_id = await loop.run_in_executor(
+            _executor, lambda: save_report("analyze", full_content, ticker)
+        )
+        report = get_report(report_id)
+        base_url = settings.dashboard_base_url or f"http://localhost:{settings.dashboard_port}"
+        report_url = f"{base_url}/reports/{report_id}"
+        await update.message.reply_text(f"{report.summary}\n\nFull report: {report_url}")
+    except Exception as exc:
+        log.warning("cmd_analyze: save_report failed for %s, sending fallback: %s", ticker, exc)
+        await update.message.reply_text(full_content[:500])
 
 
 @_authorized_only
@@ -254,6 +282,14 @@ def _monthly_check() -> None:
         _safe_run(cmd_monthly, "monthly")
 
 
+def _run_purge_reports() -> None:
+    """Purge expired reports from the database."""
+    from reports import purge_expired_reports  # noqa: PLC0415
+
+    count = purge_expired_reports()
+    log.info("Purged %d expired reports", count)
+
+
 def _setup_schedule() -> None:
     """Register all scheduled pipeline tasks."""
     from run_pipeline import cmd_daily, cmd_hourly, cmd_weekly  # noqa: PLC0415
@@ -262,6 +298,7 @@ def _setup_schedule() -> None:
     schedule.every().day.at("06:00").do(_safe_run, cmd_daily, "daily")
     schedule.every().sunday.at("07:00").do(_safe_run, cmd_weekly, "weekly")
     schedule.every().day.at("08:00").do(_monthly_check)
+    schedule.every().day.at("03:00").do(_run_purge_reports)
 
 
 def _run_scheduler_loop() -> None:

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Purge — WealthAgent{% endblock %}
+{% block content %}
+<h2>Purge Controls</h2>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+
+<article>
+    <header><strong>Purge Log Files</strong></header>
+    <p>Delete log files older than the specified number of days.</p>
+    {% if log_result %}
+    <p style="color: var(--pico-color-green-500);">{{ log_result }}</p>
+    {% endif %}
+    <form method="post" action="/purge/logs">
+        <label for="older_than_days">Delete logs older than (days)</label>
+        <input type="number" id="older_than_days" name="older_than_days" value="30" min="1" required>
+        <button type="submit" class="secondary">Delete Old Logs</button>
+    </form>
+</article>
+
+<article>
+    <header><strong>Purge Expired Reports</strong></header>
+    <p>Immediately delete all reports past their retention date.</p>
+    {% if report_result %}
+    <p style="color: var(--pico-color-green-500);">{{ report_result }}</p>
+    {% endif %}
+    <form method="post" action="/purge/reports">
+        <button type="submit" class="secondary">Delete Expired Reports</button>
+    </form>
+</article>
+
+</div>
+{% endblock %}

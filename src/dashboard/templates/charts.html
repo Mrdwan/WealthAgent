@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Charts — WealthAgent{% endblock %}
+{% block content %}
+<h2>Portfolio Charts</h2>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+
+    <article>
+        <header><strong>Portfolio Value Over Time</strong></header>
+        <canvas id="portfolioValueChart"></canvas>
+    </article>
+
+    <article>
+        <header><strong>Unrealized P&amp;L by Ticker</strong></header>
+        <canvas id="pnlChart"></canvas>
+    </article>
+
+    <article>
+        <header><strong>Allocation by Pool</strong></header>
+        <canvas id="allocationChart"></canvas>
+    </article>
+
+    <article>
+        <header><strong>Tax Year {{ now.year }}</strong></header>
+        <canvas id="taxYearChart"></canvas>
+    </article>
+
+</div>
+
+<script src="/static/chart.min.js"></script>
+<script>
+async function loadChart(url, canvasId, type, options={}) {
+    const resp = await fetch(url);
+    const data = await resp.json();
+    const ctx = document.getElementById(canvasId).getContext('2d');
+    new Chart(ctx, { type, data, options });
+}
+
+loadChart('/api/charts/portfolio-value', 'portfolioValueChart', 'line', {
+    plugins: { legend: { display: false } },
+    scales: { y: { beginAtZero: false } }
+});
+loadChart('/api/charts/pnl-by-ticker', 'pnlChart', 'bar', {
+    indexAxis: 'y',
+    plugins: { legend: { display: false } }
+});
+loadChart('/api/charts/allocation', 'allocationChart', 'pie');
+loadChart('/api/charts/tax-year', 'taxYearChart', 'bar', {
+    scales: { x: { stacked: false }, y: { beginAtZero: true } }
+});
+</script>
+{% endblock %}
