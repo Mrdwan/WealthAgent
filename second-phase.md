@@ -277,23 +277,23 @@ tests/
 
 ### Tasks
 
-- [ ] **2.1** Create `src/dashboard/routes_logs.py`
-  - [ ] Write tests first
-  - [ ] `GET /logs` — list log files sorted by date desc
-  - [ ] `GET /logs/{filename}` — view file contents
-  - [ ] Validate filename format (DD-MM-YYYY.log)
-  - [ ] Escape HTML in log contents
+- [x] **2.1** Create `src/dashboard/routes_logs.py`
+  - [x] Write tests first
+  - [x] `GET /logs` — list log files sorted by date desc
+  - [x] `GET /logs/{filename}` — view file contents
+  - [x] Validate filename format (DD-MM-YYYY.log)
+  - [x] Escape HTML in log contents
 
-- [ ] **2.2** Create `src/dashboard/templates/logs/list.html`
+- [x] **2.2** Create `src/dashboard/templates/logs/list.html`
   - List of log files as links
   - Show file size and date
 
-- [ ] **2.3** Create `src/dashboard/templates/logs/view.html`
+- [x] **2.3** Create `src/dashboard/templates/logs/view.html`
   - Pre-formatted log content
   - Line numbers
   - Back to list link
 
-- [ ] **2.4** Add "Logs" link to navigation in base.html
+- [x] **2.4** Add "Logs" link to navigation in base.html
 
 ---
 
@@ -412,7 +412,7 @@ All tests must pass with 100% coverage before each phase is complete.
 - [x] `tests/test_dashboard_reports.py` — report routes
 
 ### Phase 2 Tests
-- [ ] `tests/test_dashboard_logs.py` — log routes
+- [x] `tests/test_dashboard_logs.py` — log routes
 
 ### Phase 3 Tests
 - [ ] `tests/test_dashboard_purge.py` — purge routes
