@@ -325,40 +325,40 @@ tests/
 
 ### Tasks
 
-- [ ] **4.1** Download Chart.js
+- [x] **4.1** Download Chart.js
   - `src/dashboard/static/chart.min.js`
 
-- [ ] **4.2** Create `src/dashboard/routes_charts.py`
-  - [ ] Write tests first
-  - [ ] `GET /charts` — charts dashboard page
-  - [ ] `GET /api/charts/portfolio-value` — JSON data
-  - [ ] `GET /api/charts/pnl-by-ticker` — JSON data
-  - [ ] `GET /api/charts/allocation` — JSON data
-  - [ ] `GET /api/charts/tax-year` — JSON data
+- [x] **4.2** Create `src/dashboard/routes_charts.py`
+  - [x] Write tests first
+  - [x] `GET /charts` — charts dashboard page
+  - [x] `GET /api/charts/portfolio-value` — JSON data
+  - [x] `GET /api/charts/pnl-by-ticker` — JSON data
+  - [x] `GET /api/charts/allocation` — JSON data
+  - [x] `GET /api/charts/tax-year` — JSON data
 
-- [ ] **4.3** Implement `portfolio_value_data()` helper
+- [x] **4.3** Implement `portfolio_value_data()` helper
   - Query price_history + holdings
   - Compute daily portfolio value
   - Return last 90 days by default
 
-- [ ] **4.4** Implement `pnl_by_ticker_data()` helper
+- [x] **4.4** Implement `pnl_by_ticker_data()` helper
   - Compute unrealized P&L per ticker
   - Return sorted by P&L amount
 
-- [ ] **4.5** Implement `allocation_data()` helper
+- [x] **4.5** Implement `allocation_data()` helper
   - Group holdings by pool
   - Return value per pool
 
-- [ ] **4.6** Implement `tax_year_data()` helper
+- [x] **4.6** Implement `tax_year_data()` helper
   - Query tax_year table
   - Return realized gains, exemption used, remaining
 
-- [ ] **4.7** Create `src/dashboard/templates/charts.html`
+- [x] **4.7** Create `src/dashboard/templates/charts.html`
   - 2x2 grid of chart cards
   - Each card: title + canvas element
   - JavaScript to fetch data and render Chart.js
 
-- [ ] **4.8** Add "Charts" link to navigation in base.html
+- [x] **4.8** Add "Charts" link to navigation in base.html
 
 ---
 
@@ -418,7 +418,7 @@ All tests must pass with 100% coverage before each phase is complete.
 - [x] `tests/test_dashboard_purge.py` — purge routes
 
 ### Phase 4 Tests
-- [ ] `tests/test_dashboard_charts.py` — chart routes and data helpers
+- [x] `tests/test_dashboard_charts.py` — chart routes and data helpers
 
 ### Phase 5 Tests
 - [ ] `tests/test_dashboard_alerts.py` — alert routes and config

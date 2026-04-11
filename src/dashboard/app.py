@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 
 from config.settings import settings
 from dashboard.auth import create_session_token, verify_password
+from dashboard.routes_charts import router as charts_router
 from dashboard.routes_logs import router as logs_router
 from dashboard.routes_purge import router as purge_router
 from dashboard.routes_reports import router as reports_router
@@ -65,6 +66,7 @@ def create_app() -> FastAPI:
     app.include_router(reports_router)
     app.include_router(logs_router)
     app.include_router(purge_router)
+    app.include_router(charts_router)
 
     return app
 
