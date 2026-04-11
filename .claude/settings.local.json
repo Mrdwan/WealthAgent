@@ -4,7 +4,17 @@
       "Bash(uv sync:*)",
       "Bash(uv run:*)",
       "Bash(uv lock:*)",
-      "Bash(docker compose:*)"
+      "Bash(docker compose:*)",
+      "Bash(uv sync:*)",
+      "Bash(uv run:*)",
+      "Bash(uv lock:*)",
+      "Bash(docker compose:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(uv add:*)"
     ]
   }
 }
