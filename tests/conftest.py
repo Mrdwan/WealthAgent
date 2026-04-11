@@ -46,6 +46,7 @@ def _fresh_db():
         for table in (
             "reports",
             "alerts_log",
+            "alert_config",
             "news_signals",
             "news_articles",
             "fundamentals",

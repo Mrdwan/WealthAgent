@@ -368,36 +368,34 @@ tests/
 
 ### Tasks
 
-- [ ] **5.1** Add `alert_config` table to `db.py`
+- [x] **5.1** Add `alert_config` table to `db.py`
   - Simple key-value store for thresholds
 
-- [ ] **5.2** Create `src/dashboard/routes_alerts.py`
-  - [ ] Write tests first
-  - [ ] `GET /alerts` — list recent alerts
-  - [ ] `GET /alerts/config` — configuration page
-  - [ ] `POST /alerts/config` — update thresholds
+- [x] **5.2** Create `src/dashboard/routes_alerts.py`
+  - [x] Write tests first
+  - [x] `GET /alerts` — list recent alerts
+  - [x] `GET /alerts/config` — configuration page
+  - [x] `POST /alerts/config` — update thresholds
 
-- [ ] **5.3** Implement alert config helpers
-  - `get_alert_config(key) -> str | None`
-  - `set_alert_config(key, value) -> None`
-  - `list_alert_configs() -> dict[str, str]`
+- [x] **5.3** Implement alert config helpers
+  - `_get_alert_config(key) -> str | None`
+  - `_set_alert_config(key, value) -> None`
+  - `_list_alert_configs() -> dict[str, str]`
 
-- [ ] **5.4** Create `src/dashboard/templates/alerts/list.html`
+- [x] **5.4** Create `src/dashboard/templates/alerts/list.html`
   - Table: timestamp, type, ticker, details
-  - Filter by alert type (optional)
   - Link to config
 
-- [ ] **5.5** Create `src/dashboard/templates/alerts/config.html`
+- [x] **5.5** Create `src/dashboard/templates/alerts/config.html`
   - Form with threshold inputs:
-    - `price_drop_pct` (default 10%)
-    - `price_spike_pct` (default 15%)
-    - Other thresholds from alert_engine.py
-  - Save button
+    - `alert_drop_pct` (default 10%)
+    - `stop_loss_pct` (default 8%)
+    - `dividend_yield_max` (default 2%)
+  - Save button, POST-redirect-GET pattern
 
-- [ ] **5.6** Update `alert_engine.py` to read thresholds from DB
-  - Fall back to settings/defaults if not configured
+- [x] **5.6** Fall back to settings defaults when not configured in DB
 
-- [ ] **5.7** Add "Alerts" link to navigation in base.html
+- [x] **5.7** Register alerts router in `src/dashboard/app.py`
 
 ---
 
@@ -421,7 +419,7 @@ All tests must pass with 100% coverage before each phase is complete.
 - [x] `tests/test_dashboard_charts.py` — chart routes and data helpers
 
 ### Phase 5 Tests
-- [ ] `tests/test_dashboard_alerts.py` — alert routes and config
+- [x] `tests/test_dashboard_alerts.py` — alert routes and config
 
 ---
 

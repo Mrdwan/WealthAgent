@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Alert Configuration — WealthAgent{% endblock %}
+{% block content %}
+<div style="margin-bottom: 1rem;">
+    <a href="/alerts">← Back to Alerts</a>
+</div>
+<h2>Alert Thresholds</h2>
+
+{% if saved %}
+<p style="color: var(--pico-color-green-500);">Settings saved.</p>
+{% endif %}
+
+<article style="max-width: 600px;">
+    <form method="post" action="/alerts/config">
+        <label for="alert_drop_pct">
+            Price Drop Alert (%)
+            <small>Trigger alert when price drops by this % from recent high</small>
+        </label>
+        <input type="number" id="alert_drop_pct" name="alert_drop_pct"
+               value="{{ config.alert_drop_pct }}" step="0.1" min="0.1" required>
+
+        <label for="stop_loss_pct">
+            Stop Loss (%)
+            <small>Hard stop loss threshold</small>
+        </label>
+        <input type="number" id="stop_loss_pct" name="stop_loss_pct"
+               value="{{ config.stop_loss_pct }}" step="0.1" min="0.1" required>
+
+        <label for="dividend_yield_max">
+            Max Dividend Yield (%)
+            <small>For growth stocks — flag anything above this yield</small>
+        </label>
+        <input type="number" id="dividend_yield_max" name="dividend_yield_max"
+               value="{{ config.dividend_yield_max }}" step="0.1" min="0" required>
+
+        <button type="submit">Save Thresholds</button>
+    </form>
+</article>
+{% endblock %}

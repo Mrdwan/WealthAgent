@@ -165,6 +165,13 @@ class AlertLog(BaseModel):
     action_taken: str | None = None
 
 
+class AlertConfig(BaseModel):
+    """A runtime-configurable alert threshold stored in the database."""
+
+    key: str
+    value: str
+
+
 class Report(BaseModel):
     """A saved LLM advisor report."""
 
@@ -345,6 +352,11 @@ CREATE TABLE IF NOT EXISTS reports (
 
 CREATE INDEX IF NOT EXISTS idx_reports_created_at ON reports(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_reports_expires_at ON reports(expires_at);
+
+CREATE TABLE IF NOT EXISTS alert_config (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
