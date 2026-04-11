@@ -24,16 +24,11 @@ services:
       ollama:
         condition: service_healthy
     ports:
-      - "${DASHBOARD_PORT:-8080}:8080"
+      - "${DASHBOARD_PORT:-8081}:${DASHBOARD_PORT:-8081}"
     volumes:
       - ./data:/app/data
       - ./config:/app/config:ro
       - ./logs:/app/logs
-    environment:
-      - DASHBOARD_ENABLED=true
-      - DASHBOARD_PORT=8080
-      # DASHBOARD_SECRET_KEY — set in .env (required for production)
-      # DASHBOARD_BASE_URL — set in .env (e.g. http://192.168.1.x:8080)
     env_file:
       - .env
     networks:
