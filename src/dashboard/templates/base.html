@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}WealthAgent{% endblock %}</title>
+    <link rel="stylesheet" href="/static/pico.min.css">
+    <link rel="stylesheet" href="/static/app.css">
+    <script src="/static/htmx.min.js" defer></script>
+</head>
+<body>
+    <nav class="container-fluid">
+        <ul>
+            <li><strong><a href="/reports" class="contrast">WealthAgent</a></strong></li>
+        </ul>
+        <ul>
+            <li><a href="/reports">Reports</a></li>
+            <li><a href="/logs">Logs</a></li>
+            <li><a href="/charts">Charts</a></li>
+            <li><a href="/alerts">Alerts</a></li>
+            <li><a href="/purge">Purge</a></li>
+            <li><a href="/logout" class="secondary">Logout</a></li>
+        </ul>
+    </nav>
+    <main class="container" style="padding-top: 2rem;">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

@@ -1,19 +1,22 @@
 """WealthAgent entrypoint.
 
-Initialises the database then execs the Telegram bot process.
+Initialises the database, optionally starts the dashboard as a background
+process, then execs the Telegram bot process.
 Run this file instead of telegram_bot.py directly so that the
 schema is always up-to-date on container start.
 """
 
 import logging
 import os
+import subprocess
 import sys
 from pathlib import Path
+
+from config.settings import settings
 
 
 def main() -> None:
     """Bootstrap the application."""
-    from config.settings import settings  # noqa: PLC0415
     from log_setup import setup_logging  # noqa: PLC0415
 
     # 1. Configure logging before anything else
@@ -29,7 +32,17 @@ def main() -> None:
     init_db()
     log.info("Database ready: %s", settings.db_path)
 
-    # 4. Replace this process with the Telegram bot
+    # 4. Start the dashboard as a background process (if enabled)
+    if settings.dashboard_enabled:
+        dashboard_cmd = [
+            sys.executable,
+            "-c",
+            "from dashboard.app import run_dashboard; run_dashboard()",
+        ]
+        subprocess.Popen(dashboard_cmd, cwd=Path(__file__).parent)  # noqa: S603
+        log.info("Dashboard starting on port %d", settings.dashboard_port)
+
+    # 5. Replace this process with the Telegram bot
     bot = Path(__file__).parent / "telegram_bot.py"
     log.info("Launching bot: %s", bot)
     os.execv(sys.executable, [sys.executable, str(bot)])

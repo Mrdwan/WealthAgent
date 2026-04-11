@@ -162,3 +162,43 @@ def test_rss_feeds_invalid_json_env(monkeypatch):
 
     s = Settings()
     assert "https://a.com" in s.rss_feeds
+
+
+# --- Dashboard settings ---
+
+
+def test_dashboard_defaults():
+    """Dashboard settings have sensible defaults."""
+    from config.settings import Settings
+
+    s = Settings()
+    assert s.dashboard_enabled is True
+    assert s.dashboard_port == 8080
+    assert s.dashboard_secret_key is None
+    assert s.dashboard_base_url is None
+
+
+def test_report_retention_default():
+    """report_retention_days defaults to 90."""
+    from config.settings import Settings
+
+    s = Settings()
+    assert s.report_retention_days == 90
+
+
+def test_dashboard_settings_from_env(monkeypatch):
+    """Dashboard settings are read from env vars."""
+    monkeypatch.setenv("DASHBOARD_ENABLED", "false")
+    monkeypatch.setenv("DASHBOARD_PORT", "9090")
+    monkeypatch.setenv("DASHBOARD_SECRET_KEY", "supersecret")
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "http://192.168.1.10:8080")
+    monkeypatch.setenv("REPORT_RETENTION_DAYS", "30")
+
+    from config.settings import Settings
+
+    s = Settings()
+    assert s.dashboard_enabled is False
+    assert s.dashboard_port == 9090
+    assert s.dashboard_secret_key == "supersecret"
+    assert s.dashboard_base_url == "http://192.168.1.10:8080"
+    assert s.report_retention_days == 30

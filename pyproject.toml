@@ -4,22 +4,31 @@ version = "0.1.0"
 description = "Investment pipeline for Raspberry Pi 5"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.115.0",
     "feedparser",
     "finvizfinance",
+    "httpx>=0.27.0",
+    "itsdangerous>=2.2.0",
+    "jinja2>=3.1.0",
     "lxml",
+    "markdown>=3.7",
     "pydantic",
     "pydantic-settings",
     "python-dotenv",
+    "python-multipart>=0.0.20",
     "python-telegram-bot",
     "requests",
     "schedule",
+    "uvicorn[standard]>=0.34.0",
     "yfinance",
 ]
 
 [dependency-groups]
 dev = [
+    "anyio[trio]>=4.0.0",
     "pre-commit",
     "pytest",
+    "pytest-asyncio>=0.24.0",
     "pytest-cov",
     "ruff",
 ]

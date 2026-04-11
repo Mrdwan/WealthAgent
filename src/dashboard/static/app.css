@@ -1,0 +1,28 @@
+/* WealthAgent Dashboard custom styles */
+
+.report-content h1,
+.report-content h2,
+.report-content h3 {
+    margin-top: 1.5rem;
+}
+
+.report-content ul,
+.report-content ol {
+    padding-left: 1.5rem;
+}
+
+.report-content pre {
+    background: var(--pico-code-background-color);
+    padding: 1rem;
+    border-radius: 0.5rem;
+    overflow-x: auto;
+}
+
+nav ul li a {
+    text-decoration: none;
+}
+
+mark {
+    padding: 0.2em 0.5em;
+    border-radius: 0.3em;
+}

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}{{ report.report_type | title }} Report — WealthAgent{% endblock %}
+{% block content %}
+<div style="margin-bottom: 1.5rem;">
+    <a href="/reports">← Back to Reports</a>
+</div>
+
+<hgroup>
+    <h2>{{ report.report_type | title }} Report{% if report.ticker %}: {{ report.ticker }}{% endif %}</h2>
+    <p>{{ report.created_at.strftime('%d %B %Y at %H:%M') if report.created_at else '' }}</p>
+</hgroup>
+
+<article>
+    <header><strong>Summary</strong></header>
+    <p>{{ report.summary }}</p>
+</article>
+
+<article>
+    <header><strong>Full Analysis</strong></header>
+    <div class="report-content">
+        {{ content_html | safe }}
+    </div>
+</article>
+{% endblock %}

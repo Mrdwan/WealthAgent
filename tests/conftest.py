@@ -44,6 +44,7 @@ def _fresh_db():
     conn = get_conn()
     try:
         for table in (
+            "reports",
             "alerts_log",
             "news_signals",
             "news_articles",

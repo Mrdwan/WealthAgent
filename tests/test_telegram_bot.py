@@ -182,18 +182,34 @@ def test_cmd_status_unauthorized(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_rebalance_sends_ack_then_result(monkeypatch):
-    """Rebalance sends acknowledgment first, then the advisor result."""
+def test_cmd_rebalance_sends_summary_link(monkeypatch):
+    """Rebalance sends acknowledgment, then summary + link when save_report succeeds."""
+    from datetime import datetime, timedelta
+
     import telegram_bot
+    from db import Report
 
     monkeypatch.setattr(telegram_bot.settings, "telegram_chat_id", "42")
+    monkeypatch.setattr(telegram_bot.settings, "dashboard_base_url", "http://pi:8080")
     update = mock.MagicMock()
     update.effective_chat.id = 42
     update.message.reply_text = mock.AsyncMock()
 
+    mock_report = Report(
+        id=7,
+        report_type="rebalance",
+        summary="Key rec: Hold AAPL.",
+        full_content="Full analysis content...",
+        expires_at=datetime.now() + timedelta(days=90),
+    )
+
+    mock_reports = mock.MagicMock(save_report=lambda *a, **kw: 7, get_report=lambda _: mock_report)
     with mock.patch.dict(
         "sys.modules",
-        {"advisor": mock.MagicMock(monthly_rebalance=lambda: "Hold AAPL")},
+        {
+            "advisor": mock.MagicMock(monthly_rebalance=lambda: "Full analysis content..."),
+            "reports": mock_reports,
+        },
     ):
         asyncio.run(telegram_bot.cmd_rebalance(update, mock.MagicMock()))
 
@@ -201,7 +217,72 @@ def test_cmd_rebalance_sends_ack_then_result(monkeypatch):
     ack = update.message.reply_text.call_args_list[0][0][0]
     result = update.message.reply_text.call_args_list[1][0][0]
     assert "30+" in ack
-    assert "Hold AAPL" in result
+    assert "Key rec: Hold AAPL." in result
+    assert "http://pi:8080/reports/7" in result
+
+
+def test_cmd_rebalance_uses_default_url_when_base_url_not_set(monkeypatch):
+    """Uses localhost:<dashboard_port> when dashboard_base_url is None."""
+    from datetime import datetime, timedelta
+
+    import telegram_bot
+    from db import Report
+
+    monkeypatch.setattr(telegram_bot.settings, "telegram_chat_id", "42")
+    monkeypatch.setattr(telegram_bot.settings, "dashboard_base_url", None)
+    monkeypatch.setattr(telegram_bot.settings, "dashboard_port", 8080)
+    update = mock.MagicMock()
+    update.effective_chat.id = 42
+    update.message.reply_text = mock.AsyncMock()
+
+    mock_report = Report(
+        id=3,
+        report_type="rebalance",
+        summary="Summary text.",
+        full_content="Full content.",
+        expires_at=datetime.now() + timedelta(days=90),
+    )
+
+    mock_reports2 = mock.MagicMock(save_report=lambda *a, **kw: 3, get_report=lambda _: mock_report)
+    with mock.patch.dict(
+        "sys.modules",
+        {
+            "advisor": mock.MagicMock(monthly_rebalance=lambda: "Full content."),
+            "reports": mock_reports2,
+        },
+    ):
+        asyncio.run(telegram_bot.cmd_rebalance(update, mock.MagicMock()))
+
+    result = update.message.reply_text.call_args_list[1][0][0]
+    assert "http://localhost:8080/reports/3" in result
+
+
+def test_cmd_rebalance_fallback_when_save_report_raises(monkeypatch):
+    """Falls back to first 500 chars when save_report raises an exception."""
+    import telegram_bot
+
+    monkeypatch.setattr(telegram_bot.settings, "telegram_chat_id", "42")
+    update = mock.MagicMock()
+    update.effective_chat.id = 42
+    update.message.reply_text = mock.AsyncMock()
+
+    full_content = "Hold AAPL " * 100  # 1000 chars
+
+    def _fail_save(*a, **kw):
+        raise RuntimeError("DB unavailable")
+
+    with mock.patch.dict(
+        "sys.modules",
+        {
+            "advisor": mock.MagicMock(monthly_rebalance=lambda: full_content),
+            "reports": mock.MagicMock(save_report=_fail_save),
+        },
+    ):
+        asyncio.run(telegram_bot.cmd_rebalance(update, mock.MagicMock()))
+
+    assert update.message.reply_text.call_count == 2
+    result = update.message.reply_text.call_args_list[1][0][0]
+    assert result == full_content[:500]
 
 
 def test_cmd_rebalance_unauthorized(monkeypatch):
@@ -218,7 +299,7 @@ def test_cmd_rebalance_unauthorized(monkeypatch):
 
 
 def test_cmd_rebalance_handles_error(monkeypatch):
-    """Rebalance sends error message when advisor fails."""
+    """Rebalance sends error message when advisor monthly_rebalance fails."""
     import telegram_bot
 
     monkeypatch.setattr(telegram_bot.settings, "telegram_chat_id", "42")
@@ -259,20 +340,41 @@ def test_cmd_analyze_no_args(monkeypatch):
     assert "Usage" in update.message.reply_text.call_args[0][0]
 
 
-def test_cmd_analyze_sends_ack_then_result(monkeypatch):
-    """Analyze sends acknowledgment first, then the advisor result."""
+def test_cmd_analyze_sends_summary_link(monkeypatch):
+    """Analyze sends acknowledgment, then summary + link when save_report succeeds."""
+    from datetime import datetime, timedelta
+
     import telegram_bot
+    from db import Report
 
     monkeypatch.setattr(telegram_bot.settings, "telegram_chat_id", "42")
+    monkeypatch.setattr(telegram_bot.settings, "dashboard_base_url", "http://pi:8080")
     update = mock.MagicMock()
     update.effective_chat.id = 42
     update.message.reply_text = mock.AsyncMock()
     context = mock.MagicMock()
     context.args = ["aapl"]
 
+    mock_report = Report(
+        id=5,
+        report_type="analyze",
+        ticker="AAPL",
+        summary="Buy AAPL — strong fundamentals.",
+        full_content="Full analysis for AAPL...",
+        expires_at=datetime.now() + timedelta(days=90),
+    )
+
+    def _analyze(ticker):
+        return f"Full analysis for {ticker}..."
+
     with mock.patch.dict(
         "sys.modules",
-        {"advisor": mock.MagicMock(analyze_opportunity=lambda ticker: f"Buy {ticker}")},
+        {
+            "advisor": mock.MagicMock(analyze_opportunity=_analyze),
+            "reports": mock.MagicMock(
+                save_report=lambda *a, **kw: 5, get_report=lambda _: mock_report
+            ),
+        },
     ):
         asyncio.run(telegram_bot.cmd_analyze(update, context))
 
@@ -281,6 +383,37 @@ def test_cmd_analyze_sends_ack_then_result(monkeypatch):
     result = update.message.reply_text.call_args_list[1][0][0]
     assert "AAPL" in ack  # ticker uppercased
     assert "Buy AAPL" in result
+    assert "http://pi:8080/reports/5" in result
+
+
+def test_cmd_analyze_fallback_when_save_report_raises(monkeypatch):
+    """Falls back to first 500 chars when save_report raises an exception."""
+    import telegram_bot
+
+    monkeypatch.setattr(telegram_bot.settings, "telegram_chat_id", "42")
+    update = mock.MagicMock()
+    update.effective_chat.id = 42
+    update.message.reply_text = mock.AsyncMock()
+    context = mock.MagicMock()
+    context.args = ["TSLA"]
+
+    full_content = "Strong buy TSLA " * 60  # 960 chars
+
+    def _fail_save(*a, **kw):
+        raise RuntimeError("DB error")
+
+    with mock.patch.dict(
+        "sys.modules",
+        {
+            "advisor": mock.MagicMock(analyze_opportunity=lambda ticker: full_content),
+            "reports": mock.MagicMock(save_report=_fail_save),
+        },
+    ):
+        asyncio.run(telegram_bot.cmd_analyze(update, context))
+
+    assert update.message.reply_text.call_count == 2
+    result = update.message.reply_text.call_args_list[1][0][0]
+    assert result == full_content[:500]
 
 
 def test_cmd_analyze_handles_error(monkeypatch):
@@ -316,6 +449,25 @@ def test_cmd_analyze_unauthorized(monkeypatch):
 
     asyncio.run(telegram_bot.cmd_analyze(update, mock.MagicMock()))
     update.message.reply_text.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _run_purge_reports
+# ---------------------------------------------------------------------------
+
+
+def test_run_purge_reports_calls_purge_and_logs(monkeypatch):
+    """_run_purge_reports calls purge_expired_reports and logs the count."""
+    import telegram_bot
+
+    mock_purge = mock.MagicMock(return_value=3)
+    with mock.patch.dict(
+        "sys.modules",
+        {"reports": mock.MagicMock(purge_expired_reports=mock_purge)},
+    ):
+        telegram_bot._run_purge_reports()
+
+    mock_purge.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -383,8 +535,8 @@ def test_monthly_check_skips_other_days(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_setup_schedule_registers_four_jobs():
-    """Registers exactly 4 scheduled jobs."""
+def test_setup_schedule_registers_five_jobs():
+    """Registers exactly 5 scheduled jobs (hourly, daily, weekly, monthly-check, purge)."""
     import schedule
 
     import telegram_bot
@@ -392,7 +544,7 @@ def test_setup_schedule_registers_four_jobs():
     schedule.clear()
     try:
         telegram_bot._setup_schedule()
-        assert len(schedule.jobs) == 4
+        assert len(schedule.jobs) == 5
     finally:
         schedule.clear()
 

@@ -165,6 +165,18 @@ class AlertLog(BaseModel):
     action_taken: str | None = None
 
 
+class Report(BaseModel):
+    """A saved LLM advisor report."""
+
+    id: int | None = None
+    created_at: datetime | None = None
+    report_type: str = Field(..., pattern="^(rebalance|analyze)$")
+    ticker: str | None = None
+    summary: str
+    full_content: str
+    expires_at: datetime
+
+
 # ---------------------------------------------------------------------------
 # Connection helpers
 # ---------------------------------------------------------------------------
@@ -320,6 +332,19 @@ CREATE TABLE IF NOT EXISTS alerts_log (
     details      TEXT,
     action_taken TEXT
 );
+
+CREATE TABLE IF NOT EXISTS reports (
+    id           INTEGER PRIMARY KEY,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    report_type  TEXT NOT NULL CHECK(report_type IN ('rebalance', 'analyze')),
+    ticker       TEXT,
+    summary      TEXT NOT NULL,
+    full_content TEXT NOT NULL,
+    expires_at   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_reports_created_at ON reports(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reports_expires_at ON reports(expires_at);
 """
 
 
