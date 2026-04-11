@@ -20,7 +20,7 @@ def test_prompt_path_structure():
 
     import advisor
 
-    expected = Path(advisor.__file__).resolve().parent / "config" / "investment_prompt.txt"
+    expected = Path(advisor.__file__).resolve().parent / "config" / "investment_prompt.md"
     assert expected == advisor._PROMPT_PATH
 
 

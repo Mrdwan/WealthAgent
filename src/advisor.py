@@ -26,7 +26,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-_PROMPT_PATH = Path(__file__).resolve().parent / "config" / "investment_prompt.txt"
+_PROMPT_PATH = Path(__file__).resolve().parent / "config" / "investment_prompt.md"
 
 _FALLBACK_SYSTEM_PROMPT = (
     "You are a disciplined investment advisor for a European retail investor. "
@@ -44,7 +44,7 @@ _REQUEST_TIMEOUT = 300
 
 
 def _load_system_prompt() -> str:
-    """Load the system prompt from config/investment_prompt.txt.
+    """Load the system prompt from config/investment_prompt.md.
 
     Falls back to an embedded default if the file does not exist.
     """
