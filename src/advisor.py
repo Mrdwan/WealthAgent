@@ -66,6 +66,7 @@ def _call_llm(system_prompt: str, user_message: str) -> str:
     (rather than raising) when configuration is missing.
     """
     if not settings.advisor_base_url:
+        log.warning("ADVISOR_BASE_URL is not set — cannot call advisor LLM")
         return (
             "Advisor base URL not configured. "
             "Set ADVISOR_BASE_URL in your .env file "
@@ -75,6 +76,7 @@ def _call_llm(system_prompt: str, user_message: str) -> str:
     base = settings.advisor_base_url
     needs_key = "ollama" not in base
     if needs_key and not settings.advisor_api_key:
+        log.warning("ADVISOR_API_KEY is not set for non-Ollama endpoint %s", base)
         return "Advisor API key not configured. Set ADVISOR_API_KEY in your .env file."
 
     url = f"{base.rstrip('/')}/chat/completions"
@@ -90,6 +92,14 @@ def _call_llm(system_prompt: str, user_message: str) -> str:
         ],
     }
 
+    log.info(
+        "Calling advisor LLM: model=%s url=%s system_chars=%d user_chars=%d",
+        settings.advisor_model,
+        url,
+        len(system_prompt),
+        len(user_message),
+    )
+
     resp = requests.post(url, headers=headers, json=payload, timeout=_REQUEST_TIMEOUT)
     resp.raise_for_status()
     data = resp.json()
@@ -103,7 +113,9 @@ def _call_llm(system_prompt: str, user_message: str) -> str:
         usage.get("total_tokens", 0),
     )
 
-    return data["choices"][0]["message"]["content"]
+    content = data["choices"][0]["message"]["content"]
+    log.info("Advisor response: %d chars", len(content))
+    return content
 
 
 # ---------------------------------------------------------------------------

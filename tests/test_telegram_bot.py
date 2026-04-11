@@ -464,6 +464,7 @@ def test_main_no_token_runs_scheduler_only(monkeypatch):
 
     monkeypatch.setattr(telegram_bot.settings, "telegram_bot_token", None)
     monkeypatch.setattr(telegram_bot, "_setup_schedule", mock.MagicMock())
+    monkeypatch.setattr(telegram_bot, "setup_logging", mock.MagicMock())
 
     mock_thread = mock.MagicMock()
     with (
@@ -483,6 +484,7 @@ def test_main_with_token_starts_polling(monkeypatch):
 
     monkeypatch.setattr(telegram_bot.settings, "telegram_bot_token", "tok123")
     monkeypatch.setattr(telegram_bot, "_setup_schedule", mock.MagicMock())
+    monkeypatch.setattr(telegram_bot, "setup_logging", mock.MagicMock())
 
     mock_app = mock.MagicMock()
     monkeypatch.setattr(telegram_bot, "_build_application", mock.MagicMock(return_value=mock_app))
@@ -493,6 +495,40 @@ def test_main_with_token_starts_polling(monkeypatch):
 
     mock_thread.start.assert_called_once()
     mock_app.run_polling.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _send_long
+# ---------------------------------------------------------------------------
+
+
+def test_send_long_short_message():
+    """A message under 4096 chars is sent as a single reply."""
+    import telegram_bot
+
+    msg = mock.MagicMock()
+    msg.reply_text = mock.AsyncMock()
+
+    asyncio.run(telegram_bot._send_long(msg, "Short message"))
+
+    msg.reply_text.assert_called_once_with("Short message")
+
+
+def test_send_long_chunked_message():
+    """A message over 4096 chars is split into multiple replies."""
+    import telegram_bot
+
+    msg = mock.MagicMock()
+    msg.reply_text = mock.AsyncMock()
+
+    long_text = "A" * (telegram_bot._TELEGRAM_MAX * 2 + 100)
+    asyncio.run(telegram_bot._send_long(msg, long_text))
+
+    assert msg.reply_text.call_count == 3
+    chunks = [c[0][0] for c in msg.reply_text.call_args_list]
+    assert len(chunks[0]) == telegram_bot._TELEGRAM_MAX
+    assert len(chunks[1]) == telegram_bot._TELEGRAM_MAX
+    assert len(chunks[2]) == 100
 
 
 # ---------------------------------------------------------------------------

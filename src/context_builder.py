@@ -418,13 +418,21 @@ def build_context() -> str:
     holdings, fundamentals, signals, alerts, tax position, budget, and
     screener candidates.
     """
+    log.info("Building portfolio context…")
     holdings = _get_holdings_with_prices()
+    log.info("Holdings: %d positions", len(holdings))
     fx = _get_fx_rates()
+    log.info("FX rates: %s", {k: v for k, v in fx.items()})
     fund_map = _get_fundamentals_map()
+    log.info("Fundamentals: %d tickers", len(fund_map))
     signals = _get_recent_signals()
+    log.info("Recent signals: %d", len(signals))
     alerts = _get_active_alerts()
+    log.info("Active alerts: %d", len(alerts))
     tax = _get_tax_year()
+    log.info("Tax year record: %s", "found" if tax else "not found")
     candidates = _get_screener_candidates()
+    log.info("Screener candidates: %d", len(candidates))
 
     # Portfolio totals
     total_value = sum(h["current_value_eur"] or 0 for h in holdings)
@@ -455,7 +463,9 @@ def build_context() -> str:
         _format_section("SCREENER CANDIDATES", _format_screener(candidates)),
     ]
 
-    return "\n".join(sections)
+    context = "\n".join(sections)
+    log.info("Context built: %d chars", len(context))
+    return context
 
 
 def build_holdings_summary() -> str:

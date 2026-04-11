@@ -22,6 +22,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 from config.settings import settings
+from log_setup import setup_logging
 
 log = logging.getLogger(__name__)
 
@@ -38,8 +39,17 @@ WealthAgent commands:
 
 _VALID_POOLS = {"long_term", "short_term", "bond"}
 
+# Telegram hard limit on message length
+_TELEGRAM_MAX = 4096
+
 # Thread pool for blocking LLM calls — limited to 2 workers to conserve Pi resources
 _executor = ThreadPoolExecutor(max_workers=2)
+
+
+async def _send_long(message, text: str) -> None:
+    """Send text to Telegram, splitting into ≤4096-char chunks if needed."""
+    for i in range(0, len(text), _TELEGRAM_MAX):
+        await message.reply_text(text[i : i + _TELEGRAM_MAX])
 
 
 # ---------------------------------------------------------------------------
@@ -92,13 +102,15 @@ async def cmd_rebalance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     """Handle /rebalance — run advisor LLM and send rebalance recommendations."""
     from advisor import monthly_rebalance  # noqa: PLC0415
 
+    log.info("cmd_rebalance: requested by chat_id=%s", update.effective_chat.id)
     await update.message.reply_text("Generating rebalance recommendations\u2026 (30+ seconds)")
     loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(_executor, monthly_rebalance)
-        await update.message.reply_text(result)
+        log.info("cmd_rebalance: response ready (%d chars)", len(result))
+        await _send_long(update.message, result)
     except Exception as exc:
-        log.error("Rebalance failed: %s", exc)
+        log.error("cmd_rebalance failed: %s", exc, exc_info=True)
         await update.message.reply_text(f"Rebalance failed: {exc}")
 
 
@@ -112,13 +124,15 @@ async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     ticker = context.args[0].upper()
+    log.info("cmd_analyze: ticker=%s chat_id=%s", ticker, update.effective_chat.id)
     await update.message.reply_text(f"Analyzing {ticker}\u2026 (30+ seconds)")
     loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(_executor, analyze_opportunity, ticker)
-        await update.message.reply_text(result)
+        log.info("cmd_analyze: response ready for %s (%d chars)", ticker, len(result))
+        await _send_long(update.message, result)
     except Exception as exc:
-        log.error("Analyze failed for %s: %s", ticker, exc)
+        log.error("cmd_analyze failed for %s: %s", ticker, exc, exc_info=True)
         await update.message.reply_text(f"Analysis of {ticker} failed: {exc}")
 
 
@@ -287,10 +301,7 @@ def main() -> None:
 
     If TELEGRAM_BOT_TOKEN is not set, runs in scheduler-only mode.
     """
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
+    setup_logging(settings.log_dir)
     log.info("WealthAgent bot starting\u2026")
 
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))

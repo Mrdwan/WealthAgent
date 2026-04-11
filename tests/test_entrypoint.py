@@ -4,10 +4,13 @@ from unittest import mock
 
 
 def test_entrypoint_main():
-    """main() calls init_db then os.execv to launch the bot."""
+    """main() configures logging, calls init_db, then os.execv to launch the bot."""
     import entrypoint
 
-    with mock.patch.object(entrypoint.os, "execv") as mock_execv:
+    with (
+        mock.patch.object(entrypoint.os, "execv") as mock_execv,
+        mock.patch("log_setup.setup_logging"),
+    ):
         entrypoint.main()
     mock_execv.assert_called_once()
     args = mock_execv.call_args[0]
