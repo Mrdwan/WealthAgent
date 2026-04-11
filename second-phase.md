@@ -303,19 +303,19 @@ tests/
 
 ### Tasks
 
-- [ ] **3.1** Create `src/dashboard/routes_purge.py`
-  - [ ] Write tests first
-  - [ ] `GET /purge` — purge controls page
-  - [ ] `POST /purge/logs` — delete logs older than X days
-  - [ ] `POST /purge/reports` — delete expired reports manually
-  - [ ] Return count of deleted items
+- [x] **3.1** Create `src/dashboard/routes_purge.py`
+  - [x] Write tests first
+  - [x] `GET /purge` — purge controls page
+  - [x] `POST /purge/logs` — delete logs older than X days
+  - [x] `POST /purge/reports` — delete expired reports manually
+  - [x] Return count of deleted items
 
-- [ ] **3.2** Create `src/dashboard/templates/purge.html`
+- [x] **3.2** Create `src/dashboard/templates/purge.html`
   - Form: "Delete logs older than [ ] days" + submit
   - Form: "Delete expired reports now" + submit
   - Show result message after purge
 
-- [ ] **3.3** Add "Purge" link to navigation in base.html
+- [x] **3.3** Add "Purge" link to navigation in base.html
 
 ---
 
@@ -415,7 +415,7 @@ All tests must pass with 100% coverage before each phase is complete.
 - [x] `tests/test_dashboard_logs.py` — log routes
 
 ### Phase 3 Tests
-- [ ] `tests/test_dashboard_purge.py` — purge routes
+- [x] `tests/test_dashboard_purge.py` — purge routes
 
 ### Phase 4 Tests
 - [ ] `tests/test_dashboard_charts.py` — chart routes and data helpers
