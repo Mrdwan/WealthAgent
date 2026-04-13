@@ -11,11 +11,13 @@ CLI usage (inside the container):
     python -m advisor analyze PLTR
 """
 
+import json
 import logging
 import sys
 from pathlib import Path
 
 import requests
+from pydantic import BaseModel
 
 from config.settings import settings
 from context_builder import build_context
@@ -36,6 +38,22 @@ _FALLBACK_SYSTEM_PROMPT = (
 )
 
 _REQUEST_TIMEOUT = 300
+
+# Appended to user messages that expect a structured JSON response.
+_JSON_FORMAT_INSTRUCTION = (
+    "\n\nIMPORTANT: Respond with a single valid JSON object — no text outside it, "
+    "no markdown fences. Use exactly these two keys:\n"
+    '  "summary": one short line listing only the actions '
+    '(e.g. "sell MSFT 10 shares, buy TSLA €400, hold AAPL") — max 200 chars\n'
+    '  "report": the full markdown analysis as a string'
+)
+
+
+class AdvisorResponse(BaseModel):
+    """Structured response from the advisor LLM."""
+
+    summary: str
+    report: str
 
 
 # ---------------------------------------------------------------------------
@@ -118,12 +136,32 @@ def _call_llm(system_prompt: str, user_message: str) -> str:
     return content
 
 
+def _parse_advisor_response(content: str) -> AdvisorResponse:
+    """Parse a JSON advisor response into an AdvisorResponse.
+
+    Strips markdown code fences if present, then parses the JSON.
+    Falls back to an empty summary with the raw content as the report on failure.
+    """
+    text = content.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        end = -1 if lines[-1].strip() == "```" else len(lines)
+        text = "\n".join(lines[1:end]).strip()
+
+    try:
+        data = json.loads(text)
+        return AdvisorResponse(summary=data["summary"], report=data["report"])
+    except (json.JSONDecodeError, KeyError) as exc:
+        log.warning("Failed to parse JSON advisor response: %s", exc)
+        return AdvisorResponse(summary="", report=content)
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 
-def monthly_rebalance() -> str:
+def monthly_rebalance() -> AdvisorResponse:
     """Generate a monthly rebalance recommendation.
 
     Builds the full portfolio context and asks the advisor LLM for
@@ -133,9 +171,9 @@ def monthly_rebalance() -> str:
     context = build_context()
     user_msg = (
         "Monthly rebalance review. Analyse my portfolio and give specific "
-        "recommendations.\n\nPORTFOLIO STATE:\n\n" + context
+        "recommendations.\n\nPORTFOLIO STATE:\n\n" + context + _JSON_FORMAT_INSTRUCTION
     )
-    return _call_llm(system, user_msg)
+    return _parse_advisor_response(_call_llm(system, user_msg))
 
 
 def analyze_alert(alert_details: str) -> str:
@@ -154,7 +192,7 @@ def analyze_alert(alert_details: str) -> str:
     return _call_llm(system, user_msg)
 
 
-def analyze_opportunity(ticker: str) -> str:
+def analyze_opportunity(ticker: str) -> AdvisorResponse:
     """Deep-dive analysis on a potential investment opportunity.
 
     Args:
@@ -165,9 +203,9 @@ def analyze_opportunity(ticker: str) -> str:
     user_msg = (
         f"Analyse this opportunity: {ticker}\n"
         "Should I add it to my portfolio? If so, how much and in which pool?\n\n"
-        f"PORTFOLIO STATE:\n\n{context}"
+        f"PORTFOLIO STATE:\n\n{context}" + _JSON_FORMAT_INSTRUCTION
     )
-    return _call_llm(system, user_msg)
+    return _parse_advisor_response(_call_llm(system, user_msg))
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +224,8 @@ def main() -> None:
     cmd = sys.argv[1]
 
     if cmd == "rebalance":
-        print(monthly_rebalance())
+        resp = monthly_rebalance()
+        print(resp.report)
     elif cmd == "alert":
         if len(sys.argv) < 3:
             print("Error: alert command requires details argument.")
@@ -196,7 +235,8 @@ def main() -> None:
         if len(sys.argv) < 3:
             print("Error: analyze command requires a ticker argument.")
             sys.exit(1)
-        print(analyze_opportunity(sys.argv[2]))
+        resp = analyze_opportunity(sys.argv[2])
+        print(resp.report)
     else:
         print(usage)
         sys.exit(1)

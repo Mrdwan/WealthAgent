@@ -1,7 +1,5 @@
 """Unit tests for src/dashboard/routes_reports.py."""
 
-from unittest.mock import patch
-
 import pytest
 from starlette.testclient import TestClient
 
@@ -29,11 +27,12 @@ def unauth_client(monkeypatch):
 
 
 def _insert_report(report_type: str = "rebalance", ticker: str | None = None) -> int:
-    """Insert a report directly via save_report with mocked summary generation."""
+    """Insert a report directly via save_report."""
     from reports import save_report
 
-    with patch("reports.generate_summary", return_value="Test summary."):
-        return save_report(report_type, f"Full content for {report_type}.", ticker=ticker)
+    return save_report(
+        report_type, f"Full content for {report_type}.", ticker=ticker, summary="Test summary."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -75,11 +74,10 @@ def test_reports_list_shows_reports(client):
 
 def test_reports_list_pagination(client):
     # Insert 25 reports so we get 2 pages
-    for i in range(25):
-        with patch("reports.generate_summary", return_value=f"Summary {i}."):
-            from reports import save_report
+    from reports import save_report
 
-            save_report("rebalance", f"Content {i}.")
+    for i in range(25):
+        save_report("rebalance", f"Content {i}.", summary=f"Summary {i}.")
 
     response_p1 = client.get("/reports?page=1")
     assert response_p1.status_code == 200

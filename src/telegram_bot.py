@@ -99,38 +99,38 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 @_authorized_only
 async def cmd_rebalance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /rebalance — run advisor LLM, save report, and send summary with link."""
+    """Handle /rebalance — run advisor LLM, save report, and send summary to Telegram."""
     from advisor import monthly_rebalance  # noqa: PLC0415
 
     log.info("cmd_rebalance: requested by chat_id=%s", update.effective_chat.id)
     await update.message.reply_text("Generating rebalance recommendations\u2026 (30+ seconds)")
     loop = asyncio.get_running_loop()
     try:
-        full_content = await loop.run_in_executor(_executor, monthly_rebalance)
-        log.info("cmd_rebalance: response ready (%d chars)", len(full_content))
+        response = await loop.run_in_executor(_executor, monthly_rebalance)
+        log.info("cmd_rebalance: response ready (%d chars)", len(response.report))
     except Exception as exc:
         log.error("cmd_rebalance failed: %s", exc, exc_info=True)
         await update.message.reply_text(f"Rebalance failed: {exc}")
         return
 
     try:
-        from reports import get_report, save_report  # noqa: PLC0415
+        from reports import save_report  # noqa: PLC0415
 
         report_id = await loop.run_in_executor(
-            _executor, lambda: save_report("rebalance", full_content)
+            _executor,
+            lambda: save_report("rebalance", response.report, summary=response.summary),
         )
-        report = get_report(report_id)
-        base_url = settings.dashboard_base_url or f"http://localhost:{settings.dashboard_port}"
-        report_url = f"{base_url}/reports/{report_id}"
-        await update.message.reply_text(f"{report.summary}\n\nFull report: {report_url}")
+        log.info("cmd_rebalance: report saved as id=%d", report_id)
     except Exception as exc:
-        log.warning("cmd_rebalance: save_report failed, sending fallback: %s", exc)
-        await update.message.reply_text(full_content[:500])
+        log.warning("cmd_rebalance: save_report failed: %s", exc)
+
+    summary = response.summary or "Rebalance analysis complete."
+    await update.message.reply_text(summary)
 
 
 @_authorized_only
 async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /analyze TICKER — deep analysis of a ticker, saved as report with summary link."""
+    """Handle /analyze TICKER — deep analysis of a ticker, saved as report."""
     from advisor import analyze_opportunity  # noqa: PLC0415
 
     if not context.args:
@@ -142,26 +142,26 @@ async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text(f"Analyzing {ticker}\u2026 (30+ seconds)")
     loop = asyncio.get_running_loop()
     try:
-        full_content = await loop.run_in_executor(_executor, analyze_opportunity, ticker)
-        log.info("cmd_analyze: response ready for %s (%d chars)", ticker, len(full_content))
+        response = await loop.run_in_executor(_executor, analyze_opportunity, ticker)
+        log.info("cmd_analyze: response ready for %s (%d chars)", ticker, len(response.report))
     except Exception as exc:
         log.error("cmd_analyze failed for %s: %s", ticker, exc, exc_info=True)
         await update.message.reply_text(f"Analysis of {ticker} failed: {exc}")
         return
 
     try:
-        from reports import get_report, save_report  # noqa: PLC0415
+        from reports import save_report  # noqa: PLC0415
 
         report_id = await loop.run_in_executor(
-            _executor, lambda: save_report("analyze", full_content, ticker)
+            _executor,
+            lambda: save_report("analyze", response.report, ticker, summary=response.summary),
         )
-        report = get_report(report_id)
-        base_url = settings.dashboard_base_url or f"http://localhost:{settings.dashboard_port}"
-        report_url = f"{base_url}/reports/{report_id}"
-        await update.message.reply_text(f"{report.summary}\n\nFull report: {report_url}")
+        log.info("cmd_analyze: report saved as id=%d for %s", report_id, ticker)
     except Exception as exc:
-        log.warning("cmd_analyze: save_report failed for %s, sending fallback: %s", ticker, exc)
-        await update.message.reply_text(full_content[:500])
+        log.warning("cmd_analyze: save_report failed for %s: %s", ticker, exc)
+
+    summary = response.summary or f"Analysis of {ticker} complete."
+    await update.message.reply_text(summary)
 
 
 @_authorized_only

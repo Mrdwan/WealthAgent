@@ -1,56 +1,33 @@
-"""Report storage, retrieval, and Ollama-powered summarisation for WealthAgent.
+"""Report storage and retrieval for WealthAgent.
 
 Handles persisting LLM advisor reports (rebalance and per-ticker analysis)
-to SQLite, generating concise summaries via Ollama, and purging expired entries.
+to SQLite and purging expired entries.
 """
 
 import logging
 from datetime import datetime, timedelta
 
-import ollama_client
 from config.settings import settings
 from db import Report, db_conn, get_conn
 
 log = logging.getLogger(__name__)
 
 
-def generate_summary(full_content: str) -> str:
-    """Use Ollama to generate a 2-3 sentence summary of the report.
-
-    Falls back to a truncated version of the content on any error.
-    """
-    payload = {
-        "model": settings.ollama_model,
-        "messages": [
-            {
-                "role": "user",
-                "content": (
-                    "Summarise this investment analysis in 2-3 concise sentences, "
-                    "focusing on the key recommendation. Reply with only the summary.\n\n"
-                    + full_content[:3000]
-                ),
-            }
-        ],
-    }
-    try:
-        return ollama_client.post_chat_completion(payload)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("Ollama summary failed, falling back to truncation: %s", exc)
-        if len(full_content) > 200:
-            return full_content[:200] + "…"
-        return full_content
-
-
 def save_report(
     report_type: str,
     full_content: str,
     ticker: str | None = None,
+    *,
+    summary: str,
 ) -> int:
     """Save a report and return its id.
 
-    The summary is generated via Ollama before insertion.
+    Args:
+        report_type: ``"rebalance"`` or ``"analyze"``.
+        full_content: Full markdown report text.
+        ticker: Ticker symbol for ``"analyze"`` reports; ``None`` for rebalance.
+        summary: Short one-line summary for Telegram notifications.
     """
-    summary = generate_summary(full_content)
     expires_at = datetime.now() + timedelta(days=settings.report_retention_days)
 
     with db_conn() as conn:

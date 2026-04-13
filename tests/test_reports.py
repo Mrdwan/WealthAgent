@@ -1,12 +1,10 @@
 """Unit tests for src/reports.py."""
 
 from datetime import datetime, timedelta
-from unittest.mock import patch
 
 from db import Report, get_conn
 from reports import (
     count_reports,
-    generate_summary,
     get_report,
     list_reports,
     purge_expired_reports,
@@ -19,15 +17,15 @@ from reports import (
 
 
 def test_save_report_returns_id():
-    with patch("reports.generate_summary", return_value="Short summary."):
-        report_id = save_report("rebalance", "Full content here.")
+    report_id = save_report("rebalance", "Full content here.", summary="Short summary.")
     assert isinstance(report_id, int)
     assert report_id > 0
 
 
 def test_save_report_creates_record():
-    with patch("reports.generate_summary", return_value="Short summary."):
-        report_id = save_report("rebalance", "Full content here.", ticker=None)
+    report_id = save_report(
+        "rebalance", "Full content here.", ticker=None, summary="Short summary."
+    )
     report = get_report(report_id)
     assert report is not None
     assert report.report_type == "rebalance"
@@ -37,8 +35,9 @@ def test_save_report_creates_record():
 
 
 def test_save_report_with_ticker():
-    with patch("reports.generate_summary", return_value="AAPL looks good."):
-        report_id = save_report("analyze", "Detailed AAPL analysis.", ticker="AAPL")
+    report_id = save_report(
+        "analyze", "Detailed AAPL analysis.", ticker="AAPL", summary="AAPL looks good."
+    )
     report = get_report(report_id)
     assert report is not None
     assert report.ticker == "AAPL"
@@ -46,8 +45,7 @@ def test_save_report_with_ticker():
 
 
 def test_save_report_sets_expires_at():
-    with patch("reports.generate_summary", return_value="Summary."):
-        report_id = save_report("rebalance", "Content.")
+    report_id = save_report("rebalance", "Content.", summary="Summary.")
     report = get_report(report_id)
     assert report is not None
     assert report.expires_at > datetime.now()
@@ -59,8 +57,7 @@ def test_save_report_sets_expires_at():
 
 
 def test_get_report_returns_report():
-    with patch("reports.generate_summary", return_value="Summary."):
-        report_id = save_report("analyze", "Content.", ticker="MSFT")
+    report_id = save_report("analyze", "Content.", ticker="MSFT", summary="Summary.")
     result = get_report(report_id)
     assert isinstance(result, Report)
     assert result.id == report_id
@@ -82,10 +79,9 @@ def test_list_reports_empty():
 
 
 def test_list_reports_ordered_desc():
-    with patch("reports.generate_summary", return_value="S."):
-        id1 = save_report("rebalance", "First report.")
-        id2 = save_report("rebalance", "Second report.")
-        id3 = save_report("analyze", "Third report.", ticker="GOOG")
+    id1 = save_report("rebalance", "First report.", summary="S.")
+    id2 = save_report("rebalance", "Second report.", summary="S.")
+    id3 = save_report("analyze", "Third report.", ticker="GOOG", summary="S.")
     results = list_reports()
     assert len(results) == 3
     # Most recent first
@@ -95,9 +91,8 @@ def test_list_reports_ordered_desc():
 
 
 def test_list_reports_pagination():
-    with patch("reports.generate_summary", return_value="S."):
-        for i in range(5):
-            save_report("rebalance", f"Report {i}.")
+    for i in range(5):
+        save_report("rebalance", f"Report {i}.", summary="S.")
     page1 = list_reports(limit=2, offset=0)
     page2 = list_reports(limit=2, offset=2)
     assert len(page1) == 2
@@ -115,9 +110,8 @@ def test_list_reports_pagination():
 
 def test_count_reports():
     assert count_reports() == 0
-    with patch("reports.generate_summary", return_value="S."):
-        save_report("rebalance", "One.")
-        save_report("analyze", "Two.", ticker="AAPL")
+    save_report("rebalance", "One.", summary="S.")
+    save_report("analyze", "Two.", ticker="AAPL", summary="S.")
     assert count_reports() == 2
 
 
@@ -166,35 +160,3 @@ def test_purge_expired_returns_count():
 
     count = purge_expired_reports()
     assert count == 3
-
-
-# ---------------------------------------------------------------------------
-# generate_summary
-# ---------------------------------------------------------------------------
-
-
-def test_generate_summary_calls_ollama():
-    mock_response = "This is a concise summary."
-    target = "reports.ollama_client.post_chat_completion"
-    with patch(target, return_value=mock_response) as mock_call:
-        result = generate_summary("Full investment analysis content here.")
-    assert result == mock_response
-    mock_call.assert_called_once()
-    call_payload = mock_call.call_args[0][0]
-    assert call_payload["messages"][0]["role"] == "user"
-    assert "Full investment analysis content here." in call_payload["messages"][0]["content"]
-
-
-def test_generate_summary_fallback():
-    long_content = "A" * 300
-    with patch("reports.ollama_client.post_chat_completion", side_effect=Exception("Ollama down")):
-        result = generate_summary(long_content)
-    assert result == long_content[:200] + "…"
-
-
-def test_generate_summary_short_fallback():
-    short_content = "Short content."
-    with patch("reports.ollama_client.post_chat_completion", side_effect=Exception("Ollama down")):
-        result = generate_summary(short_content)
-    assert result == short_content
-    assert "…" not in result

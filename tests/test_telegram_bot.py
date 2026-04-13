@@ -182,32 +182,26 @@ def test_cmd_status_unauthorized(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_rebalance_sends_summary_link(monkeypatch):
-    """Rebalance sends acknowledgment, then summary + link when save_report succeeds."""
-    from datetime import datetime, timedelta
-
+def test_cmd_rebalance_sends_summary(monkeypatch):
+    """Rebalance sends acknowledgment, then the advisor summary when save_report succeeds."""
     import telegram_bot
-    from db import Report
+    from advisor import AdvisorResponse
 
     monkeypatch.setattr(telegram_bot.settings, "telegram_chat_id", "42")
-    monkeypatch.setattr(telegram_bot.settings, "dashboard_base_url", "http://pi:8080")
     update = mock.MagicMock()
     update.effective_chat.id = 42
     update.message.reply_text = mock.AsyncMock()
 
-    mock_report = Report(
-        id=7,
-        report_type="rebalance",
-        summary="Key rec: Hold AAPL.",
-        full_content="Full analysis content...",
-        expires_at=datetime.now() + timedelta(days=90),
+    mock_response = AdvisorResponse(
+        summary="sell MSFT 10 shares, hold AAPL",
+        report="Full analysis content...",
     )
 
-    mock_reports = mock.MagicMock(save_report=lambda *a, **kw: 7, get_report=lambda _: mock_report)
+    mock_reports = mock.MagicMock(save_report=lambda *a, **kw: 7)
     with mock.patch.dict(
         "sys.modules",
         {
-            "advisor": mock.MagicMock(monthly_rebalance=lambda: "Full analysis content..."),
+            "advisor": mock.MagicMock(monthly_rebalance=lambda: mock_response),
             "reports": mock_reports,
         },
     ):
@@ -217,56 +211,24 @@ def test_cmd_rebalance_sends_summary_link(monkeypatch):
     ack = update.message.reply_text.call_args_list[0][0][0]
     result = update.message.reply_text.call_args_list[1][0][0]
     assert "30+" in ack
-    assert "Key rec: Hold AAPL." in result
-    assert "http://pi:8080/reports/7" in result
-
-
-def test_cmd_rebalance_uses_default_url_when_base_url_not_set(monkeypatch):
-    """Uses localhost:<dashboard_port> when dashboard_base_url is None."""
-    from datetime import datetime, timedelta
-
-    import telegram_bot
-    from db import Report
-
-    monkeypatch.setattr(telegram_bot.settings, "telegram_chat_id", "42")
-    monkeypatch.setattr(telegram_bot.settings, "dashboard_base_url", None)
-    monkeypatch.setattr(telegram_bot.settings, "dashboard_port", 8080)
-    update = mock.MagicMock()
-    update.effective_chat.id = 42
-    update.message.reply_text = mock.AsyncMock()
-
-    mock_report = Report(
-        id=3,
-        report_type="rebalance",
-        summary="Summary text.",
-        full_content="Full content.",
-        expires_at=datetime.now() + timedelta(days=90),
-    )
-
-    mock_reports2 = mock.MagicMock(save_report=lambda *a, **kw: 3, get_report=lambda _: mock_report)
-    with mock.patch.dict(
-        "sys.modules",
-        {
-            "advisor": mock.MagicMock(monthly_rebalance=lambda: "Full content."),
-            "reports": mock_reports2,
-        },
-    ):
-        asyncio.run(telegram_bot.cmd_rebalance(update, mock.MagicMock()))
-
-    result = update.message.reply_text.call_args_list[1][0][0]
-    assert "http://localhost:8080/reports/3" in result
+    assert "sell MSFT 10 shares, hold AAPL" in result
+    assert "http" not in result  # no URL in the Telegram message
 
 
 def test_cmd_rebalance_fallback_when_save_report_raises(monkeypatch):
-    """Falls back to first 500 chars when save_report raises an exception."""
+    """Still sends the advisor summary even when save_report raises an exception."""
     import telegram_bot
+    from advisor import AdvisorResponse
 
     monkeypatch.setattr(telegram_bot.settings, "telegram_chat_id", "42")
     update = mock.MagicMock()
     update.effective_chat.id = 42
     update.message.reply_text = mock.AsyncMock()
 
-    full_content = "Hold AAPL " * 100  # 1000 chars
+    mock_response = AdvisorResponse(
+        summary="hold AAPL, sell MSFT",
+        report="Full analysis content...",
+    )
 
     def _fail_save(*a, **kw):
         raise RuntimeError("DB unavailable")
@@ -274,7 +236,7 @@ def test_cmd_rebalance_fallback_when_save_report_raises(monkeypatch):
     with mock.patch.dict(
         "sys.modules",
         {
-            "advisor": mock.MagicMock(monthly_rebalance=lambda: full_content),
+            "advisor": mock.MagicMock(monthly_rebalance=lambda: mock_response),
             "reports": mock.MagicMock(save_report=_fail_save),
         },
     ):
@@ -282,7 +244,33 @@ def test_cmd_rebalance_fallback_when_save_report_raises(monkeypatch):
 
     assert update.message.reply_text.call_count == 2
     result = update.message.reply_text.call_args_list[1][0][0]
-    assert result == full_content[:500]
+    assert result == "hold AAPL, sell MSFT"
+
+
+def test_cmd_rebalance_fallback_empty_summary(monkeypatch):
+    """Uses default message when advisor summary is empty."""
+    import telegram_bot
+    from advisor import AdvisorResponse
+
+    monkeypatch.setattr(telegram_bot.settings, "telegram_chat_id", "42")
+    update = mock.MagicMock()
+    update.effective_chat.id = 42
+    update.message.reply_text = mock.AsyncMock()
+
+    mock_response = AdvisorResponse(summary="", report="Full report text.")
+    mock_reports = mock.MagicMock(save_report=lambda *a, **kw: 1)
+
+    with mock.patch.dict(
+        "sys.modules",
+        {
+            "advisor": mock.MagicMock(monthly_rebalance=lambda: mock_response),
+            "reports": mock_reports,
+        },
+    ):
+        asyncio.run(telegram_bot.cmd_rebalance(update, mock.MagicMock()))
+
+    result = update.message.reply_text.call_args_list[1][0][0]
+    assert "complete" in result.lower()
 
 
 def test_cmd_rebalance_unauthorized(monkeypatch):
@@ -340,40 +328,31 @@ def test_cmd_analyze_no_args(monkeypatch):
     assert "Usage" in update.message.reply_text.call_args[0][0]
 
 
-def test_cmd_analyze_sends_summary_link(monkeypatch):
-    """Analyze sends acknowledgment, then summary + link when save_report succeeds."""
-    from datetime import datetime, timedelta
-
+def test_cmd_analyze_sends_summary(monkeypatch):
+    """Analyze sends acknowledgment, then the advisor summary when save_report succeeds."""
     import telegram_bot
-    from db import Report
+    from advisor import AdvisorResponse
 
     monkeypatch.setattr(telegram_bot.settings, "telegram_chat_id", "42")
-    monkeypatch.setattr(telegram_bot.settings, "dashboard_base_url", "http://pi:8080")
     update = mock.MagicMock()
     update.effective_chat.id = 42
     update.message.reply_text = mock.AsyncMock()
     context = mock.MagicMock()
     context.args = ["aapl"]
 
-    mock_report = Report(
-        id=5,
-        report_type="analyze",
-        ticker="AAPL",
-        summary="Buy AAPL — strong fundamentals.",
-        full_content="Full analysis for AAPL...",
-        expires_at=datetime.now() + timedelta(days=90),
+    mock_response = AdvisorResponse(
+        summary="buy AAPL €500 — strong fundamentals",
+        report="Full analysis for AAPL...",
     )
 
     def _analyze(ticker):
-        return f"Full analysis for {ticker}..."
+        return mock_response
 
     with mock.patch.dict(
         "sys.modules",
         {
             "advisor": mock.MagicMock(analyze_opportunity=_analyze),
-            "reports": mock.MagicMock(
-                save_report=lambda *a, **kw: 5, get_report=lambda _: mock_report
-            ),
+            "reports": mock.MagicMock(save_report=lambda *a, **kw: 5),
         },
     ):
         asyncio.run(telegram_bot.cmd_analyze(update, context))
@@ -382,13 +361,14 @@ def test_cmd_analyze_sends_summary_link(monkeypatch):
     ack = update.message.reply_text.call_args_list[0][0][0]
     result = update.message.reply_text.call_args_list[1][0][0]
     assert "AAPL" in ack  # ticker uppercased
-    assert "Buy AAPL" in result
-    assert "http://pi:8080/reports/5" in result
+    assert "buy AAPL €500 — strong fundamentals" in result
+    assert "http" not in result  # no URL in the Telegram message
 
 
 def test_cmd_analyze_fallback_when_save_report_raises(monkeypatch):
-    """Falls back to first 500 chars when save_report raises an exception."""
+    """Still sends the advisor summary even when save_report raises an exception."""
     import telegram_bot
+    from advisor import AdvisorResponse
 
     monkeypatch.setattr(telegram_bot.settings, "telegram_chat_id", "42")
     update = mock.MagicMock()
@@ -397,7 +377,10 @@ def test_cmd_analyze_fallback_when_save_report_raises(monkeypatch):
     context = mock.MagicMock()
     context.args = ["TSLA"]
 
-    full_content = "Strong buy TSLA " * 60  # 960 chars
+    mock_response = AdvisorResponse(
+        summary="buy TSLA €300",
+        report="Strong buy TSLA analysis...",
+    )
 
     def _fail_save(*a, **kw):
         raise RuntimeError("DB error")
@@ -405,7 +388,7 @@ def test_cmd_analyze_fallback_when_save_report_raises(monkeypatch):
     with mock.patch.dict(
         "sys.modules",
         {
-            "advisor": mock.MagicMock(analyze_opportunity=lambda ticker: full_content),
+            "advisor": mock.MagicMock(analyze_opportunity=lambda ticker: mock_response),
             "reports": mock.MagicMock(save_report=_fail_save),
         },
     ):
@@ -413,7 +396,36 @@ def test_cmd_analyze_fallback_when_save_report_raises(monkeypatch):
 
     assert update.message.reply_text.call_count == 2
     result = update.message.reply_text.call_args_list[1][0][0]
-    assert result == full_content[:500]
+    assert result == "buy TSLA €300"
+
+
+def test_cmd_analyze_fallback_empty_summary(monkeypatch):
+    """Uses default message when advisor summary is empty."""
+    import telegram_bot
+    from advisor import AdvisorResponse
+
+    monkeypatch.setattr(telegram_bot.settings, "telegram_chat_id", "42")
+    update = mock.MagicMock()
+    update.effective_chat.id = 42
+    update.message.reply_text = mock.AsyncMock()
+    context = mock.MagicMock()
+    context.args = ["PLTR"]
+
+    mock_response = AdvisorResponse(summary="", report="Full PLTR report.")
+    mock_reports = mock.MagicMock(save_report=lambda *a, **kw: 1)
+
+    with mock.patch.dict(
+        "sys.modules",
+        {
+            "advisor": mock.MagicMock(analyze_opportunity=lambda ticker: mock_response),
+            "reports": mock_reports,
+        },
+    ):
+        asyncio.run(telegram_bot.cmd_analyze(update, context))
+
+    result = update.message.reply_text.call_args_list[1][0][0]
+    assert "PLTR" in result
+    assert "complete" in result.lower()
 
 
 def test_cmd_analyze_handles_error(monkeypatch):

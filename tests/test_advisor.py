@@ -1,5 +1,6 @@
 """Unit tests for advisor.py."""
 
+import json
 import sys
 from unittest import mock
 
@@ -151,6 +152,55 @@ def test_call_llm_api_error(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# _parse_advisor_response
+# ---------------------------------------------------------------------------
+
+
+def test_parse_advisor_response_valid_json():
+    import advisor
+
+    raw = json.dumps({"summary": "sell MSFT, buy TSLA", "report": "## Full report\n..."})
+    result = advisor._parse_advisor_response(raw)
+    assert result.summary == "sell MSFT, buy TSLA"
+    assert result.report == "## Full report\n..."
+
+
+def test_parse_advisor_response_strips_markdown_fences():
+    import advisor
+
+    raw = '```json\n{"summary": "hold AAPL", "report": "Full analysis."}\n```'
+    result = advisor._parse_advisor_response(raw)
+    assert result.summary == "hold AAPL"
+    assert result.report == "Full analysis."
+
+
+def test_parse_advisor_response_strips_plain_fences():
+    import advisor
+
+    raw = '```\n{"summary": "buy PLTR", "report": "Details."}\n```'
+    result = advisor._parse_advisor_response(raw)
+    assert result.summary == "buy PLTR"
+
+
+def test_parse_advisor_response_invalid_json_fallback():
+    import advisor
+
+    raw = "This is not JSON at all."
+    result = advisor._parse_advisor_response(raw)
+    assert result.summary == ""
+    assert result.report == raw
+
+
+def test_parse_advisor_response_missing_key_fallback():
+    import advisor
+
+    raw = json.dumps({"summary": "sell MSFT"})  # missing "report"
+    result = advisor._parse_advisor_response(raw)
+    assert result.summary == ""
+    assert result.report == raw
+
+
+# ---------------------------------------------------------------------------
 # Public functions
 # ---------------------------------------------------------------------------
 
@@ -158,16 +208,19 @@ def test_call_llm_api_error(monkeypatch):
 def test_monthly_rebalance(monkeypatch):
     import advisor
 
+    raw_json = json.dumps({"summary": "buy TSLA €400", "report": "Rebalance: buy TSLA"})
     monkeypatch.setattr(advisor, "_load_system_prompt", lambda: "sys")
     monkeypatch.setattr(advisor, "build_context", lambda: "context data")
 
-    with mock.patch.object(advisor, "_call_llm", return_value="Rebalance: hold") as mock_call:
+    with mock.patch.object(advisor, "_call_llm", return_value=raw_json) as mock_call:
         result = advisor.monthly_rebalance()
 
-    assert result == "Rebalance: hold"
+    assert result.summary == "buy TSLA €400"
+    assert result.report == "Rebalance: buy TSLA"
     user_msg = mock_call.call_args[0][1]
     assert "context data" in user_msg
     assert "Monthly rebalance" in user_msg
+    assert "JSON" in user_msg  # JSON format instruction included
 
 
 def test_analyze_alert(monkeypatch):
@@ -188,16 +241,19 @@ def test_analyze_alert(monkeypatch):
 def test_analyze_opportunity(monkeypatch):
     import advisor
 
+    raw_json = json.dumps({"summary": "buy PLTR €300", "report": "PLTR looks good"})
     monkeypatch.setattr(advisor, "_load_system_prompt", lambda: "sys")
     monkeypatch.setattr(advisor, "build_context", lambda: "context data")
 
-    with mock.patch.object(advisor, "_call_llm", return_value="Buy PLTR") as mock_call:
+    with mock.patch.object(advisor, "_call_llm", return_value=raw_json) as mock_call:
         result = advisor.analyze_opportunity("PLTR")
 
-    assert result == "Buy PLTR"
+    assert result.summary == "buy PLTR €300"
+    assert result.report == "PLTR looks good"
     user_msg = mock_call.call_args[0][1]
     assert "PLTR" in user_msg
     assert "context data" in user_msg
+    assert "JSON" in user_msg  # JSON format instruction included
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +265,11 @@ def test_main_rebalance(monkeypatch, capsys):
     import advisor
 
     monkeypatch.setattr(sys, "argv", ["advisor", "rebalance"])
-    monkeypatch.setattr(advisor, "monthly_rebalance", lambda: "Rebalance output")
+    monkeypatch.setattr(
+        advisor,
+        "monthly_rebalance",
+        lambda: advisor.AdvisorResponse(summary="buy TSLA", report="Rebalance output"),
+    )
     advisor.main()
     assert "Rebalance output" in capsys.readouterr().out
 
@@ -227,7 +287,11 @@ def test_main_analyze(monkeypatch, capsys):
     import advisor
 
     monkeypatch.setattr(sys, "argv", ["advisor", "analyze", "PLTR"])
-    monkeypatch.setattr(advisor, "analyze_opportunity", lambda t: f"Analyze: {t}")
+    monkeypatch.setattr(
+        advisor,
+        "analyze_opportunity",
+        lambda t: advisor.AdvisorResponse(summary="buy PLTR", report=f"Analyze: {t}"),
+    )
     advisor.main()
     assert "Analyze: PLTR" in capsys.readouterr().out
 
