@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Investment pipeline for Raspberry Pi 5"
 requires-python = ">=3.12"
 dependencies = [
+    "beautifulsoup4>=4.14.3",
     "fastapi>=0.115.0",
     "feedparser",
     "finvizfinance",
@@ -86,6 +87,7 @@ testpaths = ["tests"]
 pythonpath = ["src", "."]
 markers = [
     "ollama: requires a live Ollama instance — enable with --with-ollama",
+    "integration: requires live network access — enable with --with-integration",
 ]
 
 # ---------------------------------------------------------------------------
