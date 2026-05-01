@@ -1,6 +1,6 @@
 """Unit tests for price_fetcher.py."""
 
-from datetime import date
+from datetime import date, timedelta
 from unittest import mock
 
 import pytest
@@ -25,6 +25,16 @@ def _seed_price(ticker: str, dt: str, usd: float | None, eur: float | None) -> N
             "INSERT OR REPLACE INTO price_history (ticker, date, close_usd, close_eur, source)"
             " VALUES (?, ?, ?, ?, ?)",
             (ticker, dt, usd, eur, "test"),
+        )
+
+
+def _seed_iwda_holding(ticker: str, fetched_at: str, rank: int = 1) -> None:
+    """Seed a single row into iwda_holdings for testing."""
+    with db_conn() as conn:
+        conn.execute(
+            "INSERT INTO iwda_holdings (ticker, name, weight_pct, rank, fetched_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (ticker, ticker, 1.0, rank, fetched_at),
         )
 
 
@@ -253,13 +263,200 @@ def test_get_holdings_tickers_filters_bonds():
     assert "BOND1" not in tickers
 
 
+# --- _get_iwda_holdings_tickers ---
+
+
+def test_get_iwda_holdings_tickers_empty():
+    from price_fetcher import _get_iwda_holdings_tickers
+
+    assert _get_iwda_holdings_tickers() == []
+
+
+def test_get_iwda_holdings_tickers_returns_latest_snapshot():
+    from price_fetcher import _get_iwda_holdings_tickers
+
+    # Seed two snapshots; only the latest should be returned
+    _seed_iwda_holding("MSFT", "2024-01-01T00:00:00+00:00", rank=1)
+    _seed_iwda_holding("NVDA", "2024-02-01T00:00:00+00:00", rank=1)
+    _seed_iwda_holding("AAPL", "2024-02-01T00:00:00+00:00", rank=2)
+
+    tickers = _get_iwda_holdings_tickers()
+    assert "NVDA" in tickers
+    assert "AAPL" in tickers
+    assert "MSFT" not in tickers
+
+
+# --- _build_ticker_universe ---
+
+
+def test_build_ticker_universe_includes_iwda_always():
+    from price_fetcher import _build_ticker_universe
+
+    # No holdings, no iwda_holdings
+    universe = _build_ticker_universe()
+    assert universe == ["IWDA.L"]
+
+
+def test_build_ticker_universe_combines_sources():
+    from price_fetcher import _build_ticker_universe
+
+    _seed_holding("AAPL", "long_term")
+    _seed_holding("BOND1", "bond")  # bonds excluded
+    _seed_iwda_holding("MSFT", "2024-01-01T00:00:00+00:00", rank=1)
+
+    universe = _build_ticker_universe()
+    assert "AAPL" in universe
+    assert "MSFT" in universe
+    assert "IWDA.L" in universe
+    assert "BOND1" not in universe
+    # Result is sorted
+    assert universe == sorted(universe)
+
+
+def test_build_ticker_universe_deduplicates():
+    from price_fetcher import _build_ticker_universe
+
+    # AAPL in both holdings and iwda_holdings
+    _seed_holding("AAPL", "long_term")
+    _seed_iwda_holding("AAPL", "2024-01-01T00:00:00+00:00", rank=1)
+
+    universe = _build_ticker_universe()
+    assert universe.count("AAPL") == 1
+
+
+def test_build_ticker_universe_empty_iwda_holdings():
+    from price_fetcher import _build_ticker_universe
+
+    _seed_holding("TSLA", "long_term")
+    universe = _build_ticker_universe()
+    assert "TSLA" in universe
+    assert "IWDA.L" in universe
+    assert universe == sorted(universe)
+
+
+def test_build_ticker_universe_empty_holdings():
+    from price_fetcher import _build_ticker_universe
+
+    _seed_iwda_holding("MSFT", "2024-01-01T00:00:00+00:00", rank=1)
+    universe = _build_ticker_universe()
+    assert "MSFT" in universe
+    assert "IWDA.L" in universe
+
+
+# --- fetch_price_with_anomaly_check ---
+
+
+def test_anomaly_check_no_prior_price_skips_check(monkeypatch):
+    """No prior price → return Tiingo without any yfinance call."""
+    import price_fetcher
+
+    monkeypatch.setattr(price_fetcher, "fetch_tiingo_price", lambda t: 100.0)
+    yf_mock = mock.MagicMock()
+    monkeypatch.setattr(price_fetcher, "fetch_yfinance_price", yf_mock)
+
+    price, source = price_fetcher.fetch_price_with_anomaly_check("AAPL", None, 1.1)
+
+    assert price == 100.0
+    assert source == "tiingo"
+    yf_mock.assert_not_called()
+
+
+def test_anomaly_check_small_change_no_crosscheck(monkeypatch):
+    """Move within 5% → no yfinance cross-check."""
+    import price_fetcher
+
+    # prior_price_eur = 100.0, current_eurusd = 1.0, tiingo = 102.0 → 2% change
+    monkeypatch.setattr(price_fetcher, "fetch_tiingo_price", lambda t: 102.0)
+    yf_mock = mock.MagicMock()
+    monkeypatch.setattr(price_fetcher, "fetch_yfinance_price", yf_mock)
+
+    price, source = price_fetcher.fetch_price_with_anomaly_check("AAPL", 100.0, 1.0)
+
+    assert price == 102.0
+    assert source == "tiingo"
+    yf_mock.assert_not_called()
+
+
+def test_anomaly_check_tiingo_fails_returns_none(monkeypatch):
+    """Tiingo fails entirely → return (None, '')."""
+    import price_fetcher
+
+    monkeypatch.setattr(price_fetcher, "fetch_tiingo_price", lambda t: None)
+    yf_mock = mock.MagicMock()
+    monkeypatch.setattr(price_fetcher, "fetch_yfinance_price", yf_mock)
+
+    price, source = price_fetcher.fetch_price_with_anomaly_check("AAPL", 100.0, 1.0)
+
+    assert price is None
+    assert source == ""
+    yf_mock.assert_not_called()
+
+
+def test_anomaly_check_large_move_yfinance_agrees(monkeypatch):
+    """Tiingo >5% off, yfinance within 2% → Tiingo wins, source='tiingo'."""
+    import price_fetcher
+
+    # prior EUR = 100, EURUSD = 1.0
+    # tiingo = 110 → 10% change  (triggers cross-check)
+    # yfinance = 111 → cross-diff = |110-111|/111 = ~0.9% (within 2%)
+    monkeypatch.setattr(price_fetcher, "fetch_tiingo_price", lambda t: 110.0)
+    monkeypatch.setattr(price_fetcher, "fetch_yfinance_price", lambda t: 111.0)
+
+    price, source = price_fetcher.fetch_price_with_anomaly_check("AAPL", 100.0, 1.0)
+
+    assert price == 110.0
+    assert source == "tiingo"
+
+
+def test_anomaly_check_large_move_yfinance_disagrees(monkeypatch):
+    """Tiingo >5% off, yfinance disagrees by >2% → yfinance wins."""
+    import price_fetcher
+
+    # prior EUR = 100, EURUSD = 1.0
+    # tiingo = 115 → 15% change  (triggers cross-check)
+    # yfinance = 102 → cross-diff = |115-102|/102 = ~12.7% (>2%)
+    monkeypatch.setattr(price_fetcher, "fetch_tiingo_price", lambda t: 115.0)
+    monkeypatch.setattr(price_fetcher, "fetch_yfinance_price", lambda t: 102.0)
+
+    price, source = price_fetcher.fetch_price_with_anomaly_check("AAPL", 100.0, 1.0)
+
+    assert price == 102.0
+    assert source == "yfinance"
+
+
+def test_anomaly_check_large_move_yfinance_fails(monkeypatch):
+    """Tiingo >5% off, yfinance also fails → accept Tiingo with warning."""
+    import price_fetcher
+
+    # prior EUR = 100, EURUSD = 1.0, tiingo = 115 → 15% change
+    monkeypatch.setattr(price_fetcher, "fetch_tiingo_price", lambda t: 115.0)
+    monkeypatch.setattr(price_fetcher, "fetch_yfinance_price", lambda t: None)
+
+    price, source = price_fetcher.fetch_price_with_anomaly_check("AAPL", 100.0, 1.0)
+
+    assert price == 115.0
+    assert source == "tiingo"
+
+
 # --- fetch_all_prices ---
 
 
-def test_fetch_all_prices_no_holdings():
-    from price_fetcher import fetch_all_prices
+def test_fetch_all_prices_all_fetch_fail(monkeypatch):
+    """All price fetches return None → stored list is empty."""
+    import price_fetcher
 
-    assert fetch_all_prices() == []
+    with db_conn() as conn:
+        conn.execute(
+            "INSERT INTO fx_rates (date, pair, rate) VALUES (?, ?, ?)",
+            (date.today().isoformat(), "EURUSD", 1.1),
+        )
+    monkeypatch.setattr(price_fetcher, "fetch_ecb_rates", lambda: [])
+    monkeypatch.setattr(price_fetcher, "fetch_price_with_anomaly_check", lambda t, p, e: (None, ""))
+    monkeypatch.setattr(price_fetcher, "fetch_yfinance_price", lambda t: None)
+
+    # IWDA.L is always in universe; anomaly check returns None, yfinance fallback also None
+    result = price_fetcher.fetch_all_prices()
+    assert result == []
 
 
 def test_fetch_all_prices_success(monkeypatch):
@@ -272,29 +469,42 @@ def test_fetch_all_prices_success(monkeypatch):
             (date.today().isoformat(), "EURUSD", 1.1),
         )
     monkeypatch.setattr(price_fetcher, "fetch_ecb_rates", lambda: [])
-    monkeypatch.setattr(price_fetcher, "fetch_price", lambda t: (150.0, "tiingo"))
+    monkeypatch.setattr(
+        price_fetcher, "fetch_price_with_anomaly_check", lambda t, p, e: (150.0, "tiingo")
+    )
     result = price_fetcher.fetch_all_prices()
-    assert len(result) == 1
-    assert result[0].close_eur is not None
+    tickers = {pp.ticker for pp in result}
+    assert "AAPL" in tickers
+    assert "IWDA.L" in tickers
+    assert all(pp.close_eur is not None for pp in result)
 
 
 def test_fetch_all_prices_no_fx(monkeypatch):
+    """When get_rate_for_date raises, close_eur is None."""
     import price_fetcher
 
     _seed_holding("AAPL")
     monkeypatch.setattr(price_fetcher, "fetch_ecb_rates", lambda: [])
+    # Patch fetch_price so anomaly branch is bypassed (no FX rate cached)
     monkeypatch.setattr(price_fetcher, "fetch_price", lambda t: (150.0, "tiingo"))
     result = price_fetcher.fetch_all_prices()
-    assert len(result) == 1
-    assert result[0].close_eur is None
+    # AAPL and IWDA.L should both be attempted; close_eur is None for all
+    assert len(result) >= 1
+    assert all(pp.close_eur is None for pp in result)
 
 
 def test_fetch_all_prices_price_none(monkeypatch):
     import price_fetcher
 
     _seed_holding("AAPL")
+    with db_conn() as conn:
+        conn.execute(
+            "INSERT INTO fx_rates (date, pair, rate) VALUES (?, ?, ?)",
+            (date.today().isoformat(), "EURUSD", 1.1),
+        )
     monkeypatch.setattr(price_fetcher, "fetch_ecb_rates", lambda: [])
-    monkeypatch.setattr(price_fetcher, "fetch_price", lambda t: (None, ""))
+    monkeypatch.setattr(price_fetcher, "fetch_price_with_anomaly_check", lambda t, p, e: (None, ""))
+    monkeypatch.setattr(price_fetcher, "fetch_yfinance_price", lambda t: None)
     assert price_fetcher.fetch_all_prices() == []
 
 
@@ -310,9 +520,104 @@ def test_fetch_all_prices_ecb_exception(monkeypatch):
     monkeypatch.setattr(
         price_fetcher, "fetch_ecb_rates", mock.MagicMock(side_effect=Exception("ECB down"))
     )
-    monkeypatch.setattr(price_fetcher, "fetch_price", lambda t: (150.0, "tiingo"))
+    monkeypatch.setattr(
+        price_fetcher, "fetch_price_with_anomaly_check", lambda t, p, e: (150.0, "tiingo")
+    )
     result = price_fetcher.fetch_all_prices()
-    assert len(result) == 1
+    assert len(result) >= 1
+
+
+def test_fetch_all_prices_commodity_bypasses_anomaly(monkeypatch):
+    """Commodity tickers (XAG) must go through fetch_price, not anomaly check."""
+    import price_fetcher
+
+    _seed_holding("XAG")
+    with db_conn() as conn:
+        conn.execute(
+            "INSERT INTO fx_rates (date, pair, rate) VALUES (?, ?, ?)",
+            (date.today().isoformat(), "EURUSD", 1.1),
+        )
+    monkeypatch.setattr(price_fetcher, "fetch_ecb_rates", lambda: [])
+    # Track which tickers hit the anomaly check vs fetch_price
+    anomaly_called_for: list[str] = []
+
+    def _anomaly_check(ticker, prior_price_eur, current_eurusd):
+        anomaly_called_for.append(ticker)
+        return (150.0, "tiingo")
+
+    monkeypatch.setattr(price_fetcher, "fetch_price_with_anomaly_check", _anomaly_check)
+    monkeypatch.setattr(price_fetcher, "fetch_price", lambda t: (30.0, "yfinance"))
+    result = price_fetcher.fetch_all_prices()
+    xag_results = [pp for pp in result if pp.ticker == "XAG"]
+    assert len(xag_results) == 1
+    # XAG is a commodity — must NOT have gone through anomaly check
+    assert "XAG" not in anomaly_called_for
+
+
+def test_fetch_all_prices_anomaly_fallback_to_yfinance(monkeypatch):
+    """When anomaly check returns (None, ''), yfinance fallback is attempted."""
+    import price_fetcher
+
+    _seed_holding("AAPL")
+    with db_conn() as conn:
+        conn.execute(
+            "INSERT INTO fx_rates (date, pair, rate) VALUES (?, ?, ?)",
+            (date.today().isoformat(), "EURUSD", 1.1),
+        )
+    monkeypatch.setattr(price_fetcher, "fetch_ecb_rates", lambda: [])
+    monkeypatch.setattr(price_fetcher, "fetch_price_with_anomaly_check", lambda t, p, e: (None, ""))
+    yf_mock = mock.MagicMock(return_value=145.0)
+    monkeypatch.setattr(price_fetcher, "fetch_yfinance_price", yf_mock)
+    result = price_fetcher.fetch_all_prices()
+    aapl_results = [pp for pp in result if pp.ticker == "AAPL"]
+    assert len(aapl_results) == 1
+    assert aapl_results[0].source == "yfinance"
+
+
+def test_fetch_all_prices_includes_iwda_holdings_tickers(monkeypatch):
+    """Tickers from iwda_holdings are included in the fetch universe."""
+    import price_fetcher
+
+    _seed_iwda_holding("MSFT", "2024-01-01T00:00:00+00:00", rank=1)
+    with db_conn() as conn:
+        conn.execute(
+            "INSERT INTO fx_rates (date, pair, rate) VALUES (?, ?, ?)",
+            (date.today().isoformat(), "EURUSD", 1.1),
+        )
+    monkeypatch.setattr(price_fetcher, "fetch_ecb_rates", lambda: [])
+    monkeypatch.setattr(
+        price_fetcher, "fetch_price_with_anomaly_check", lambda t, p, e: (150.0, "tiingo")
+    )
+    result = price_fetcher.fetch_all_prices()
+    tickers = {pp.ticker for pp in result}
+    assert "MSFT" in tickers
+    assert "IWDA.L" in tickers
+
+
+def test_fetch_all_prices_prior_price_passed_to_anomaly_check(monkeypatch):
+    """Yesterday's EUR price is looked up and passed to the anomaly check."""
+    import price_fetcher
+
+    _seed_holding("AAPL")
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    _seed_price("AAPL", yesterday, 140.0, 127.0)
+    with db_conn() as conn:
+        conn.execute(
+            "INSERT INTO fx_rates (date, pair, rate) VALUES (?, ?, ?)",
+            (date.today().isoformat(), "EURUSD", 1.1),
+        )
+    monkeypatch.setattr(price_fetcher, "fetch_ecb_rates", lambda: [])
+    captured: list = []
+
+    def _fake_anomaly(ticker, prior_price_eur, current_eurusd):
+        captured.append((ticker, prior_price_eur))
+        return (150.0, "tiingo")
+
+    monkeypatch.setattr(price_fetcher, "fetch_price_with_anomaly_check", _fake_anomaly)
+    price_fetcher.fetch_all_prices()
+    aapl_calls = [(t, p) for t, p in captured if t == "AAPL"]
+    assert len(aapl_calls) == 1
+    assert aapl_calls[0][1] == pytest.approx(127.0)
 
 
 # --- get_current_price ---

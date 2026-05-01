@@ -6,12 +6,19 @@ yfinance is the fallback for everything else and for commodities like silver.
 All prices are converted to EUR using the FX rate from the same day
 (or the most recent prior rate if the exact date is unavailable).
 
+IWDA.L (London-listed iShares MSCI World ETF) is always included in the fetch
+universe so that tracking-error calculations have a price to work from.
+yfinance handles IWDA.L natively (Tiingo does not cover LSE); the existing
+Tiingo-fails → yfinance-fallback path is sufficient — no special-case code
+needed.  IWDA.L is quoted in USD on yfinance; the standard close_usd →
+close_eur conversion therefore applies unchanged.
+
 CLI usage (inside the container):
     python -m price_fetcher
 """
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 import requests
 import yfinance as yf
@@ -35,6 +42,13 @@ _COMMODITY_MAP: dict[str, str] = {
     "XAGUSD": "SI=F",
     "SI": "SI=F",
 }
+
+# ETF ticker always included so tracking-error calcs have a price
+_IWDA_TICKER = "IWDA.L"
+
+# Anomaly-detection thresholds (internal heuristics — not user-tunable)
+_ANOMALY_THRESHOLD_PCT = 5.0
+_CROSS_CHECK_TOLERANCE_PCT = 2.0
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +127,88 @@ def fetch_yfinance_price(ticker: str) -> float | None:
 
 
 # ---------------------------------------------------------------------------
+# Anomaly detection
+# ---------------------------------------------------------------------------
+
+
+def fetch_price_with_anomaly_check(
+    ticker: str,
+    prior_price_eur: float | None,
+    current_eurusd: float,
+) -> tuple[float | None, str]:
+    """Fetch the Tiingo price for *ticker* and apply an anomaly cross-check.
+
+    Compares the freshly fetched Tiingo price (converted to EUR via
+    *current_eurusd*) to *prior_price_eur* (yesterday's stored EUR price).
+    If the absolute percentage change exceeds ``_ANOMALY_THRESHOLD_PCT``:
+
+    - Fetches the yfinance price as a cross-check.
+    - If yfinance agrees within ``_CROSS_CHECK_TOLERANCE_PCT``, accepts Tiingo
+      and logs an info message confirming the real move.
+    - If yfinance disagrees, prefers yfinance and logs a warning.
+    - If yfinance also fails, accepts Tiingo and logs a warning.
+
+    When *prior_price_eur* is ``None`` (first-time ticker), the anomaly check
+    is skipped entirely.
+
+    Returns:
+        ``(price_usd, source)`` — the chosen USD price and its source label
+        (``'tiingo'`` or ``'yfinance'``).  Returns ``(None, '')`` if Tiingo
+        fetch itself fails.
+    """
+    tiingo_price = fetch_tiingo_price(ticker)
+    if tiingo_price is None:
+        return None, ""
+
+    # No prior price → skip anomaly check
+    if prior_price_eur is None:
+        return tiingo_price, "tiingo"
+
+    tiingo_eur = tiingo_price / current_eurusd
+    pct_change = abs((tiingo_eur - prior_price_eur) / prior_price_eur) * 100.0
+
+    if pct_change <= _ANOMALY_THRESHOLD_PCT:
+        return tiingo_price, "tiingo"
+
+    # Change exceeds threshold — cross-check with yfinance
+    yf_price = fetch_yfinance_price(ticker)
+
+    if yf_price is None:
+        log.warning(
+            "Tiingo anomaly for %s: %.2f EUR (%.1f%% change) but yfinance unavailable;"
+            " accepting Tiingo",
+            ticker,
+            tiingo_eur,
+            pct_change,
+        )
+        return tiingo_price, "tiingo"
+
+    yf_eur = yf_price / current_eurusd
+    cross_diff = abs((tiingo_eur - yf_eur) / yf_eur) * 100.0
+
+    if cross_diff <= _CROSS_CHECK_TOLERANCE_PCT:
+        log.info(
+            "Tiingo anomaly for %s confirmed as real move: %.1f%% change"
+            " (Tiingo %.2f EUR vs yfinance %.2f EUR agree within %.1f%%)",
+            ticker,
+            pct_change,
+            tiingo_eur,
+            yf_eur,
+            cross_diff,
+        )
+        return tiingo_price, "tiingo"
+
+    log.warning(
+        "Tiingo anomaly: %s Tiingo %.2f EUR vs yfinance %.2f EUR (diff %.1f%%); using yfinance",
+        ticker,
+        tiingo_eur,
+        yf_eur,
+        cross_diff,
+    )
+    return yf_price, "yfinance"
+
+
+# ---------------------------------------------------------------------------
 # Combined fetch with fallback
 # ---------------------------------------------------------------------------
 
@@ -156,15 +252,55 @@ def _get_holdings_tickers() -> list[str]:
     return [row["ticker"] for row in rows]
 
 
+def _get_iwda_holdings_tickers() -> list[str]:
+    """Return all distinct tickers from the most recent iwda_holdings snapshot.
+
+    Returns an empty list if the table is empty.
+    """
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT fetched_at FROM iwda_holdings ORDER BY fetched_at DESC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return []
+        latest_ts = row["fetched_at"]
+        rows = conn.execute(
+            "SELECT DISTINCT ticker FROM iwda_holdings WHERE fetched_at = ?",
+            (latest_ts,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [r["ticker"] for r in rows]
+
+
+def _build_ticker_universe() -> list[str]:
+    """Return the deduplicated, sorted union of all price-fetch targets.
+
+    Combines:
+    - Non-bond tickers from the ``holdings`` table.
+    - All distinct tickers from the most recent ``iwda_holdings`` snapshot.
+    - ``IWDA.L`` (always included for tracking-error calculations).
+    """
+    holdings = set(_get_holdings_tickers())
+    iwda = set(_get_iwda_holdings_tickers())
+    universe = holdings | iwda | {_IWDA_TICKER}
+    return sorted(universe)
+
+
 def fetch_all_prices() -> list[PricePoint]:
-    """Fetch prices for every non-bond holding, convert to EUR, and store.
+    """Fetch prices for every ticker in the universe, convert to EUR, and store.
+
+    The universe is the union of non-bond holdings, the latest iwda_holdings
+    snapshot, and IWDA.L (always).
+
+    For each equity ticker fetched via Tiingo, an anomaly check compares the
+    new price to yesterday's stored EUR price.  If the move exceeds
+    ``_ANOMALY_THRESHOLD_PCT``, a yfinance cross-check is performed.
 
     Returns the list of PricePoint objects stored.
     """
-    tickers = _get_holdings_tickers()
-    if not tickers:
-        log.info("No non-bond holdings found — nothing to fetch.")
-        return []
+    tickers = _build_ticker_universe()
 
     # Ensure we have fresh FX rates before converting
     try:
@@ -174,19 +310,47 @@ def fetch_all_prices() -> list[PricePoint]:
 
     today = date.today()
     today_str = today.isoformat()
+    yesterday = today - timedelta(days=1)
     stored: list[PricePoint] = []
 
+    # Look up today's EURUSD once (used for anomaly check conversions)
+    try:
+        current_eurusd = get_rate_for_date("EURUSD", today)
+    except ValueError:
+        current_eurusd = None
+
     for ticker in tickers:
-        price_usd, source = fetch_price(ticker)
+        # --- anomaly check: look up yesterday's EUR price ---
+        prior_pp = get_price_on_date(ticker, yesterday)
+        prior_price_eur = prior_pp.close_eur if prior_pp is not None else None
+
+        # Commodities bypass Tiingo entirely — skip anomaly check
+        if ticker.upper() in _COMMODITY_MAP:
+            price_usd, source = fetch_price(ticker)
+        elif current_eurusd is not None:
+            price_usd, source = fetch_price_with_anomaly_check(
+                ticker, prior_price_eur, current_eurusd
+            )
+            # fetch_price_with_anomaly_check returns (None, '') on Tiingo failure
+            # but we still want to try yfinance as a pure fallback
+            if price_usd is None:
+                log.info("Falling back to yfinance for %s", ticker)
+                yf_price = fetch_yfinance_price(ticker)
+                if yf_price is not None:
+                    price_usd, source = yf_price, "yfinance"
+        else:
+            # No FX rate yet — use the simple fetch (anomaly check can't run)
+            price_usd, source = fetch_price(ticker)
+
         if price_usd is None:
             log.error("Could not fetch price for %s — skipping", ticker)
             continue
 
-        # Convert to EUR using same-day (or most-recent-prior) FX rate
-        try:
-            eurusd = get_rate_for_date("EURUSD", today)
-            price_eur = price_usd / eurusd
-        except ValueError:
+        # Convert to EUR using same-day (or most-recent-prior) FX rate.
+        # If no rate was available at the start of the loop, close_eur is None.
+        if current_eurusd is not None:
+            price_eur: float | None = price_usd / current_eurusd
+        else:
             log.warning(
                 "No EURUSD rate available for %s — storing USD only for %s",
                 today_str,
