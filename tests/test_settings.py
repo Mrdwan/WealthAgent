@@ -167,11 +167,16 @@ def test_rss_feeds_invalid_json_env(monkeypatch):
 # --- Dashboard settings ---
 
 
-def test_dashboard_defaults():
+def test_dashboard_defaults(monkeypatch):
     """Dashboard settings have sensible defaults."""
+    monkeypatch.delenv("DASHBOARD_ENABLED", raising=False)
+    monkeypatch.delenv("DASHBOARD_PORT", raising=False)
+    monkeypatch.delenv("DASHBOARD_SECRET_KEY", raising=False)
+    monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
+
     from config.settings import Settings
 
-    s = Settings()
+    s = Settings(_env_file=None)
     assert s.dashboard_enabled is True
     assert s.dashboard_port == 8080
     assert s.dashboard_secret_key is None
@@ -202,3 +207,36 @@ def test_dashboard_settings_from_env(monkeypatch):
     assert s.dashboard_secret_key == "supersecret"
     assert s.dashboard_base_url == "http://192.168.1.10:8080"
     assert s.report_retention_days == 30
+
+
+# --- IWDA / monthly allocation settings ---
+
+
+def test_iwda_settings_defaults():
+    """New IWDA and monthly allocation settings have correct defaults."""
+    from config.settings import Settings
+
+    s = Settings()
+    assert s.monthly_stocks_eur == 1050.0
+    assert s.monthly_etf_eur == 450.0
+    assert s.monthly_buffer_eur == 500.0
+    assert s.iwda_top_n == 15
+    assert s.iwda_exit_buffer == 5
+
+
+def test_iwda_settings_from_env(monkeypatch):
+    """IWDA and monthly allocation settings are read from env vars."""
+    monkeypatch.setenv("MONTHLY_STOCKS_EUR", "800.0")
+    monkeypatch.setenv("MONTHLY_ETF_EUR", "300.0")
+    monkeypatch.setenv("MONTHLY_BUFFER_EUR", "200.0")
+    monkeypatch.setenv("IWDA_TOP_N", "20")
+    monkeypatch.setenv("IWDA_EXIT_BUFFER", "3")
+
+    from config.settings import Settings
+
+    s = Settings()
+    assert s.monthly_stocks_eur == 800.0
+    assert s.monthly_etf_eur == 300.0
+    assert s.monthly_buffer_eur == 200.0
+    assert s.iwda_top_n == 20
+    assert s.iwda_exit_buffer == 3

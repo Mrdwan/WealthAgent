@@ -95,6 +95,11 @@ class Settings(BaseSettings):
     monthly_budget_eur: float = 2000.0
     long_term_pct: float = 0.75
     short_term_pct: float = 0.25
+    monthly_stocks_eur: float = 1050.0  # individual-stock allocation per month
+    monthly_etf_eur: float = 450.0  # IWDA ETF allocation per month
+    monthly_buffer_eur: float = 500.0  # flexible buffer the LLM allocates
+    iwda_top_n: int = 15  # number of top IWDA holdings to mirror
+    iwda_exit_buffer: int = 5  # hysteresis: only sell if dropped to rank > top_n + this
 
     # Tax (Irish CGT defaults)
     cgt_rate: float = 0.33

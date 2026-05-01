@@ -56,6 +56,7 @@ def _fresh_db():
             "trades",
             "holdings",
             "tax_year",
+            "iwda_holdings",
         ):
             conn.execute(f"DELETE FROM {table}")  # noqa: S608
         conn.commit()

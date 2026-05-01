@@ -172,6 +172,17 @@ class AlertConfig(BaseModel):
     value: str
 
 
+class IwdaHolding(BaseModel):
+    """A monthly snapshot of a single IWDA top-N holding."""
+
+    id: int | None = None
+    ticker: str
+    name: str
+    weight_pct: float
+    rank: int
+    fetched_at: datetime
+
+
 class Report(BaseModel):
     """A saved LLM advisor report."""
 
@@ -357,6 +368,18 @@ CREATE TABLE IF NOT EXISTS alert_config (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS iwda_holdings (
+    id          INTEGER PRIMARY KEY,
+    ticker      TEXT    NOT NULL,
+    name        TEXT    NOT NULL,
+    weight_pct  REAL    NOT NULL,
+    rank        INTEGER NOT NULL,
+    fetched_at  TEXT    NOT NULL,
+    UNIQUE(ticker, fetched_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_iwda_holdings_fetched_at ON iwda_holdings(fetched_at);
 """
 
 
