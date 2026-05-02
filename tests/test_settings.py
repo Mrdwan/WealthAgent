@@ -224,6 +224,14 @@ def test_iwda_settings_defaults():
     assert s.iwda_exit_buffer == 5
 
 
+def test_alert_drop_pct_default():
+    """alert_drop_pct defaults to 15.0 (catastrophic threshold)."""
+    from config.settings import Settings
+
+    s = Settings()
+    assert s.alert_drop_pct == 15.0
+
+
 def test_iwda_settings_from_env(monkeypatch):
     """IWDA and monthly allocation settings are read from env vars."""
     monkeypatch.setenv("MONTHLY_STOCKS_EUR", "800.0")

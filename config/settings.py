@@ -106,7 +106,7 @@ class Settings(BaseSettings):
     annual_exemption: float = 1270.0
 
     # Alert thresholds
-    alert_drop_pct: float = 10.0
+    alert_drop_pct: float = 15.0
     stop_loss_pct: float = 8.0
     dividend_yield_max: float = 2.0
 

@@ -543,7 +543,7 @@ def get_consolidated_top_n(n: int | None = None) -> list[IwdaHolding]:
     return sorted_holdings[:top_n]
 
 
-def compute_changes(top_n: int | None = None) -> dict[str, list[str]]:
+def compute_changes(top_n: int | None = None) -> dict[str, list[dict]]:
     """Compare the two most recent snapshots and report holdings changes.
 
     Uses a hysteresis band (``settings.iwda_exit_buffer``) so that minor
@@ -555,10 +555,14 @@ def compute_changes(top_n: int | None = None) -> dict[str, list[str]]:
 
     Returns:
         A dict with keys:
-        - ``"new"``: tickers that entered the top-N in the latest snapshot.
-        - ``"exited"``: tickers that were in prior top-N and are now ranked
-          beyond ``top_n + exit_buffer`` (or absent).
-        - ``"kept"``: tickers present in both top-N sets.
+        - ``"new"``: dicts ``{"ticker": ..., "current_rank": ..., "prior_rank": None}``
+          for tickers that entered the top-N in the latest snapshot.
+        - ``"exited"``: dicts ``{"ticker": ..., "current_rank": ..., "prior_rank": ...}``
+          for tickers that were in prior top-N and are now ranked beyond
+          ``top_n + exit_buffer`` (or absent).  ``current_rank`` is ``None`` when
+          the ticker is completely absent from the latest snapshot.
+        - ``"kept"``: dicts ``{"ticker": ..., "current_rank": ..., "prior_rank": ...}``
+          for tickers present in both top-N sets.
     """
     resolved_n = top_n if top_n is not None else settings.iwda_top_n
     exit_threshold = resolved_n + settings.iwda_exit_buffer
@@ -603,17 +607,30 @@ def compute_changes(top_n: int | None = None) -> dict[str, list[str]]:
 
     prior_top = _top_n_tickers(prior_ts)
     current_top = _top_n_tickers(latest_ts)
+    prior_ranks = _rank_map(prior_ts)
     current_ranks = _rank_map(latest_ts)
 
-    new = sorted(current_top - prior_top)
-    kept = sorted(current_top & prior_top)
+    new = [
+        {"ticker": t, "current_rank": current_ranks.get(t), "prior_rank": None}
+        for t in sorted(current_top - prior_top)
+    ]
+    kept = [
+        {"ticker": t, "current_rank": current_ranks.get(t), "prior_rank": prior_ranks.get(t)}
+        for t in sorted(current_top & prior_top)
+    ]
 
     # Exited = was in prior top-N AND now ranked beyond threshold (or absent)
-    exited: list[str] = []
+    exited: list[dict] = []
     for ticker in sorted(prior_top - current_top):
         current_rank = current_ranks.get(ticker)
         if current_rank is None or current_rank > exit_threshold:
-            exited.append(ticker)
+            exited.append(
+                {
+                    "ticker": ticker,
+                    "current_rank": current_rank,
+                    "prior_rank": prior_ranks.get(ticker),
+                }
+            )
 
     return {"new": new, "exited": exited, "kept": kept}
 

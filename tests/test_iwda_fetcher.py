@@ -972,8 +972,10 @@ class TestComputeChanges:
         self._setup_two_snapshots(prior, current, monkeypatch)
 
         changes = compute_changes()
-        assert "NEW" in changes["new"]
-        assert "T14" in changes["exited"]
+        new_tickers = [item["ticker"] for item in changes["new"]]
+        exited_tickers = [item["ticker"] for item in changes["exited"]]
+        assert "NEW" in new_tickers
+        assert "T14" in exited_tickers
 
     def test_kept_tickers_reported(self, monkeypatch):
         from iwda_fetcher import compute_changes
@@ -1024,8 +1026,10 @@ class TestComputeChanges:
             )
 
         changes = compute_changes()
-        assert "T14" not in changes["exited"]
-        assert "T15" in changes["new"]
+        exited_tickers = [item["ticker"] for item in changes["exited"]]
+        new_tickers = [item["ticker"] for item in changes["new"]]
+        assert "T14" not in exited_tickers
+        assert "T15" in new_tickers
 
     def test_hysteresis_rank_beyond_buffer_is_exited(self, monkeypatch):
         """Rank 15 → rank 22 with buffer=5 → IS in exited (22 > 15+5=20)."""
@@ -1068,8 +1072,10 @@ class TestComputeChanges:
             )
 
         changes = compute_changes()
-        assert "T14" in changes["exited"]
-        assert "T15" in changes["new"]
+        exited_tickers = [item["ticker"] for item in changes["exited"]]
+        new_tickers = [item["ticker"] for item in changes["new"]]
+        assert "T14" in exited_tickers
+        assert "T15" in new_tickers
 
     def test_ticker_absent_from_current_snapshot_is_exited(self, monkeypatch):
         """Ticker in prior but completely absent from current snapshot → exited."""
@@ -1088,7 +1094,42 @@ class TestComputeChanges:
         _seed_snapshot(current, ts2)
 
         changes = compute_changes()
-        assert "T14" in changes["exited"]
+        exited_tickers = [item["ticker"] for item in changes["exited"]]
+        assert "T14" in exited_tickers
+
+    def test_rank_info_included_in_results(self, monkeypatch):
+        """Each item in new/exited/kept includes ticker, current_rank, prior_rank."""
+        from iwda_fetcher import compute_changes
+
+        monkeypatch.setattr(settings, "iwda_top_n", 3)
+        monkeypatch.setattr(settings, "iwda_exit_buffer", 5)
+
+        ts1 = datetime(2025, 3, 1, 0, 0, 0, tzinfo=UTC)
+        ts2 = datetime(2025, 4, 1, 0, 0, 0, tzinfo=UTC)
+        _seed_snapshot(["AAPL", "MSFT", "NVDA"], ts1)  # NVDA rank 3 in prior
+        _seed_snapshot(["AAPL", "MSFT", "AMZN"], ts2)  # AMZN rank 3 in current; NVDA absent
+
+        changes = compute_changes()
+
+        # kept: AAPL and MSFT
+        for item in changes["kept"]:
+            assert "ticker" in item
+            assert "current_rank" in item
+            assert "prior_rank" in item
+            assert item["prior_rank"] is not None
+            assert item["current_rank"] is not None
+
+        # new: AMZN (rank 3 current, prior_rank=None)
+        new_items = {item["ticker"]: item for item in changes["new"]}
+        assert "AMZN" in new_items
+        assert new_items["AMZN"]["current_rank"] == 3
+        assert new_items["AMZN"]["prior_rank"] is None
+
+        # exited: NVDA (absent from current → current_rank=None)
+        exited_items = {item["ticker"]: item for item in changes["exited"]}
+        assert "NVDA" in exited_items
+        assert exited_items["NVDA"]["current_rank"] is None
+        assert exited_items["NVDA"]["prior_rank"] == 3
 
     def test_not_enough_snapshots_returns_empty(self, monkeypatch):
         """With only one snapshot, compute_changes returns empty dict."""
@@ -1128,10 +1169,13 @@ class TestComputeChanges:
 
         changes = compute_changes(top_n=2)
         # Top 2 prior = AAPL, MSFT. Top 2 current = AAPL, MSFT. AMZN is rank 3.
-        assert "AAPL" in changes["kept"]
-        assert "MSFT" in changes["kept"]
-        assert "AMZN" not in changes["new"]  # rank 3 > top_n=2
-        assert "NVDA" not in changes["exited"]  # rank 3 in prior > top_n=2
+        kept_tickers = [item["ticker"] for item in changes["kept"]]
+        new_tickers = [item["ticker"] for item in changes["new"]]
+        exited_tickers = [item["ticker"] for item in changes["exited"]]
+        assert "AAPL" in kept_tickers
+        assert "MSFT" in kept_tickers
+        assert "AMZN" not in new_tickers  # rank 3 > top_n=2
+        assert "NVDA" not in exited_tickers  # rank 3 in prior > top_n=2
 
 
 # ---------------------------------------------------------------------------

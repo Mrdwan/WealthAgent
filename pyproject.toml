@@ -72,6 +72,9 @@ known-first-party = ["config"]
 "src/run_pipeline.py" = [
     "PLC0415", # lazy imports in cmd_* functions are intentional (import what you need)
 ]
+"src/alert_engine.py" = [
+    "PLC0415", # lazy import of iwda_fetcher inside check_iwda_exits breaks circular dep
+]
 "src/screener.py" = [
     "PLC0415", # lazy import of finvizfinance inside try/except (fragile, may not be installed)
 ]

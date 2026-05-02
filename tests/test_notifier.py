@@ -124,60 +124,39 @@ def test_format_alert_price_drop():
         ticker="TSLA",
         details={
             "drop_pct": -21.5,
-            "current_price_eur": 160.0,
-            "prior_price_eur": 200.0,
+            "current_price_usd": 160.0,
+            "prior_price_usd": 200.0,
             "current_date": "2024-04-09",
             "prior_date": "2024-03-10",
-            "threshold_pct": 10.0,
+            "threshold_pct": 15.0,
         },
         triggered_at=datetime.now(tz=UTC),
     )
     text = _format_alert(alert)
     assert "TSLA" in text
     assert "-21.5" in text
+    assert "$160.0" in text
 
 
-def test_format_alert_news_signal():
+def test_format_alert_iwda_exit():
     from notifier import _format_alert
 
     alert = Alert(
-        type="news_signal",
+        type="iwda_exit",
         ticker="NVDA",
         details={
-            "sentiment": "negative",
-            "catalyst": "regulation",
-            "timeframe": "months",
-            "summary": "Export controls",
-            "confidence": 0.8,
-            "signal_id": 1,
-            "article_id": 1,
+            "current_rank": 25,
+            "prior_rank": 12,
+            "top_n": 15,
+            "exit_buffer": 5,
         },
         triggered_at=datetime.now(tz=UTC),
     )
     text = _format_alert(alert)
     assert "NVDA" in text
-    assert "negative" in text
-
-
-def test_format_alert_opportunity():
-    from notifier import _format_alert
-
-    alert = Alert(
-        type="opportunity",
-        ticker="AMZN",
-        details={
-            "sentiment": "positive",
-            "catalyst": "earnings",
-            "timeframe": "weeks",
-            "summary": "Beat expectations",
-            "confidence": 0.9,
-            "signal_id": 1,
-            "article_id": 1,
-        },
-        triggered_at=datetime.now(tz=UTC),
-    )
-    text = _format_alert(alert)
-    assert "AMZN" in text
+    assert "25" in text
+    assert "12" in text
+    assert "🚪" in text
 
 
 def test_format_alert_unknown_type():

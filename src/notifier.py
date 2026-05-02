@@ -28,8 +28,7 @@ _MAX_MESSAGE_LEN = 4096
 # Emoji per alert type
 _ALERT_EMOJI: dict[str, str] = {
     "price_drop": "\U0001f4c9",  # 📉
-    "news_signal": "\U0001f4f0",  # 📰
-    "opportunity": "\U0001f4c8",  # 📈
+    "iwda_exit": "\U0001f6aa",  # 🚪
 }
 
 
@@ -109,18 +108,16 @@ def _format_alert(alert: Alert) -> str:
         d = alert.details
         lines += [
             f"Drop: <b>{d.get('drop_pct', '?')}%</b>",
-            f"Current: €{d.get('current_price_eur', '?')} ({d.get('current_date', '?')})",
-            f"30 days ago: €{d.get('prior_price_eur', '?')} ({d.get('prior_date', '?')})",
+            f"Current: ${d.get('current_price_usd', '?')} ({d.get('current_date', '?')})",
+            f"30 days ago: ${d.get('prior_price_usd', '?')} ({d.get('prior_date', '?')})",
             f"Threshold: {d.get('threshold_pct', '?')}%",
         ]
-    elif alert.type in ("news_signal", "opportunity"):
+    elif alert.type == "iwda_exit":
         d = alert.details
         lines += [
-            f"Sentiment: {d.get('sentiment', '?')}",
-            f"Catalyst: {d.get('catalyst', '?')}",
-            f"Timeframe: {d.get('timeframe', '?')}",
-            f"Confidence: {d.get('confidence', '?')}",
-            f"Summary: {d.get('summary', '?')}",
+            f"Prior rank: {d.get('prior_rank', '?')}",
+            f"Current rank: {d.get('current_rank', 'absent')}",
+            f"Top-N: {d.get('top_n', '?')} (exit buffer: {d.get('exit_buffer', '?')})",
         ]
     else:
         # Generic fallback — dump details

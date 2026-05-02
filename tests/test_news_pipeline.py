@@ -42,8 +42,6 @@ init_db()
 # Now import the pipeline modules
 from alert_engine import (  # noqa: E402
     Alert,
-    check_news_signals,
-    check_opportunities,
     check_price_drops,
     run_all_checks,
 )
@@ -354,6 +352,7 @@ def test_alert_engine() -> None:
         d = tsla_drops[0].details
         check("Drop pct is negative", d["drop_pct"] < 0, str(d["drop_pct"]))
         check("Drop exceeds threshold", abs(d["drop_pct"]) >= 10.0)
+        check("Details use USD field names", "current_price_usd" in d)
 
     # Ticker that hasn't dropped enough should NOT trigger
     _seed_holding("GOOG", pool="long_term")
@@ -362,68 +361,6 @@ def test_alert_engine() -> None:
 
     drops_goog = [a for a in check_price_drops(threshold_pct=10.0) if a.ticker == "GOOG"]
     check("GOOG small drop not triggered", len(drops_goog) == 0)
-
-    # --- News signal test ---
-    _seed_holding("NVDA", pool="long_term")
-    article_id = _seed_article(url="https://example.com/nvda-news", title="NVDA alert news")
-    _seed_signal(
-        article_id=article_id,
-        tickers=["NVDA"],
-        sentiment="negative",
-        confidence=0.8,
-        hours_ago=2,
-    )
-
-    signals = check_news_signals(hours=24)
-    nvda_signals = [a for a in signals if a.ticker == "NVDA"]
-    check("NVDA negative signal detected", len(nvda_signals) > 0)
-    if nvda_signals:
-        check("Alert type is news_signal", nvda_signals[0].type == "news_signal")
-
-    # Low-confidence signal should NOT trigger
-    article_id2 = _seed_article(url="https://example.com/nvda-low-conf", title="Low conf")
-    _seed_signal(
-        article_id=article_id2,
-        tickers=["NVDA"],
-        sentiment="negative",
-        confidence=0.4,
-        hours_ago=1,
-    )
-    # Only signals with confidence >= 0.6 should appear
-    all_signals = check_news_signals(hours=24)
-    low_conf = [
-        a for a in all_signals if a.ticker == "NVDA" and a.details.get("confidence", 1.0) < 0.6
-    ]
-    check("Low-confidence signals excluded", len(low_conf) == 0)
-
-    # --- Opportunity test ---
-    article_id3 = _seed_article(url="https://example.com/opp-news", title="Opportunity article")
-    _seed_signal(
-        article_id=article_id3,
-        tickers=["AMZN"],  # not held
-        sentiment="positive",
-        confidence=0.85,
-        hours_ago=1,
-    )
-
-    opps = check_opportunities(hours=24)
-    amzn_opps = [a for a in opps if a.ticker == "AMZN"]
-    check("AMZN opportunity detected (not held)", len(amzn_opps) > 0)
-    if amzn_opps:
-        check("Alert type is opportunity", amzn_opps[0].type == "opportunity")
-
-    # A held ticker should NOT appear in opportunities
-    _seed_holding("NVDA", pool="long_term")  # already seeded above, just ensuring
-    article_id4 = _seed_article(url="https://example.com/nvda-opp", title="NVDA positive")
-    _seed_signal(
-        article_id=article_id4,
-        tickers=["NVDA"],
-        sentiment="positive",
-        confidence=0.9,
-        hours_ago=1,
-    )
-    opps_held = [a for a in check_opportunities(hours=24) if a.ticker == "NVDA"]
-    check("Held ticker excluded from opportunities", len(opps_held) == 0)
 
     # --- run_all_checks deduplication ---
     all_alerts = run_all_checks()
@@ -515,17 +452,17 @@ def test_notifier() -> None:
             all(len(c) <= 4096 for c in nl_chunks),
         )
 
-        # Alert formatting
+        # Alert formatting — price_drop
         drop_alert = Alert(
             type="price_drop",
             ticker="TSLA",
             details={
                 "drop_pct": -21.5,
-                "current_price_eur": 160.0,
-                "prior_price_eur": 200.0,
+                "current_price_usd": 160.0,
+                "prior_price_usd": 200.0,
                 "current_date": "2024-04-09",
                 "prior_date": "2024-03-10",
-                "threshold_pct": 10.0,
+                "threshold_pct": 15.0,
             },
             triggered_at=datetime.now(tz=UTC),
         )
@@ -533,24 +470,21 @@ def test_notifier() -> None:
         check("Price drop alert contains ticker", "TSLA" in drop_text)
         check("Price drop alert contains pct", "-21.5" in drop_text)
 
-        news_alert = Alert(
-            type="news_signal",
+        # Alert formatting — iwda_exit
+        exit_alert = Alert(
+            type="iwda_exit",
             ticker="NVDA",
             details={
-                "sentiment": "negative",
-                "catalyst": "regulation",
-                "timeframe": "months",
-                "summary": "New export controls on AI chips could hurt revenue.",
-                "confidence": 0.8,
-                "signal_id": 1,
-                "article_id": 1,
+                "current_rank": 25,
+                "prior_rank": 12,
+                "top_n": 15,
+                "exit_buffer": 5,
             },
             triggered_at=datetime.now(tz=UTC),
         )
-        news_text = _format_alert(news_alert)
-        check("News signal alert contains ticker", "NVDA" in news_text)
-        check("News signal alert contains sentiment", "negative" in news_text)
-        check("News signal alert contains summary", "export controls" in news_text)
+        exit_text = _format_alert(exit_alert)
+        check("IWDA exit alert contains ticker", "NVDA" in exit_text)
+        check("IWDA exit alert contains rank", "25" in exit_text)
 
         # send_alert should not raise (stdout mode)
         raised2 = False
