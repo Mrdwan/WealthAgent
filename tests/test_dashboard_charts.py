@@ -1,4 +1,4 @@
-"""Unit tests for src/dashboard/routes_charts.py."""
+"""Unit tests for src/dashboard/routes_charts.py (JSON API)."""
 
 import pytest
 from starlette.testclient import TestClient
@@ -7,73 +7,12 @@ from db import db_conn
 
 
 @pytest.fixture()
-def client(monkeypatch):
-    """Authenticated TestClient for dashboard chart routes."""
-    monkeypatch.setattr("config.settings.settings.dashboard_secret_key", "testpassword")
-    from dashboard.app import create_app
-    from dashboard.auth import create_session_token
-
-    app = create_app()
-    c = TestClient(app, follow_redirects=False)
-    token = create_session_token()
-    c.cookies.set("wa_session", token)
-    return c
-
-
-@pytest.fixture()
-def unauth_client(monkeypatch):
-    """Unauthenticated TestClient."""
-    monkeypatch.setattr("config.settings.settings.dashboard_secret_key", "testpassword")
+def client():
+    """TestClient for dashboard chart routes (no auth needed)."""
     from dashboard.app import create_app
 
     app = create_app()
     return TestClient(app, follow_redirects=False)
-
-
-# ---------------------------------------------------------------------------
-# Auth guard
-# ---------------------------------------------------------------------------
-
-
-def test_charts_page_requires_auth(unauth_client):
-    response = unauth_client.get("/charts")
-    assert response.status_code == 302
-    assert "/login" in response.headers["location"]
-
-
-def test_portfolio_value_requires_auth(unauth_client):
-    response = unauth_client.get("/api/charts/portfolio-value")
-    assert response.status_code == 302
-    assert "/login" in response.headers["location"]
-
-
-def test_pnl_by_ticker_requires_auth(unauth_client):
-    response = unauth_client.get("/api/charts/pnl-by-ticker")
-    assert response.status_code == 302
-    assert "/login" in response.headers["location"]
-
-
-def test_allocation_requires_auth(unauth_client):
-    response = unauth_client.get("/api/charts/allocation")
-    assert response.status_code == 302
-    assert "/login" in response.headers["location"]
-
-
-def test_tax_year_requires_auth(unauth_client):
-    response = unauth_client.get("/api/charts/tax-year")
-    assert response.status_code == 302
-    assert "/login" in response.headers["location"]
-
-
-# ---------------------------------------------------------------------------
-# Charts page
-# ---------------------------------------------------------------------------
-
-
-def test_charts_page_renders(client):
-    response = client.get("/charts")
-    assert response.status_code == 200
-    assert "Portfolio Charts" in response.text
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +46,7 @@ def test_portfolio_value_with_data(client):
     assert response.status_code == 200
     data = response.json()
     assert len(data["labels"]) > 0
-    assert data["datasets"][0]["data"][-1] == pytest.approx(1500.0)  # 10 shares * 150 EUR
+    assert data["datasets"][0]["data"][-1] == pytest.approx(1500.0)
     assert data["datasets"][0]["label"] == "Portfolio Value (EUR)"
 
 
@@ -121,7 +60,6 @@ def test_portfolio_value_skips_null_close_eur(client):
             "INSERT INTO holdings (ticker, shares, entry_price_eur, entry_fx_rate, "
             "purchase_date, pool) VALUES ('MSFT', 5, 200.0, 1.1, '2024-01-01', 'short_term')"
         )
-        # Row with close_eur=NULL should be excluded
         conn.execute(
             "INSERT INTO price_history (ticker, date, close_eur) VALUES ('MSFT', ?, NULL)",
             (today,),
@@ -130,7 +68,6 @@ def test_portfolio_value_skips_null_close_eur(client):
     response = client.get("/api/charts/portfolio-value")
     assert response.status_code == 200
     data = response.json()
-    # NULL price means no usable date
     assert data["labels"] == []
     assert data["datasets"][0]["data"] == []
 
@@ -142,7 +79,6 @@ def test_portfolio_value_partial_prices_excluded(client):
     today = date.today().isoformat()
     yesterday = (date.today() - timedelta(days=1)).isoformat()
     with db_conn() as conn:
-        # Two holdings
         conn.execute(
             "INSERT INTO holdings (ticker, shares, entry_price_eur, entry_fx_rate, "
             "purchase_date, pool) VALUES ('AAPL', 10, 100.0, 1.1, '2024-01-01', 'long_term')"
@@ -151,12 +87,10 @@ def test_portfolio_value_partial_prices_excluded(client):
             "INSERT INTO holdings (ticker, shares, entry_price_eur, entry_fx_rate, "
             "purchase_date, pool) VALUES ('MSFT', 5, 200.0, 1.1, '2024-01-01', 'short_term')"
         )
-        # Yesterday: only AAPL has a price (MSFT missing → date excluded)
         conn.execute(
             "INSERT INTO price_history (ticker, date, close_eur) VALUES ('AAPL', ?, 140.0)",
             (yesterday,),
         )
-        # Today: both have prices → date included
         conn.execute(
             "INSERT INTO price_history (ticker, date, close_eur) VALUES ('AAPL', ?, 150.0)",
             (today,),
@@ -169,7 +103,6 @@ def test_portfolio_value_partial_prices_excluded(client):
     response = client.get("/api/charts/portfolio-value")
     assert response.status_code == 200
     data = response.json()
-    # Only today should appear (yesterday excluded because MSFT has no price)
     assert today in data["labels"]
     assert yesterday not in data["labels"]
 
@@ -236,7 +169,6 @@ def test_pnl_by_ticker_with_data(client):
     data = response.json()
     assert "AAPL" in data["labels"]
     idx = data["labels"].index("AAPL")
-    # pnl = (150 - 100) * 10 = 500
     assert data["datasets"][0]["data"][idx] == pytest.approx(500.0)
     assert data["datasets"][0]["label"] == "Unrealized P&L (EUR)"
 
@@ -290,7 +222,6 @@ def test_pnl_by_ticker_no_price(client):
             "INSERT INTO holdings (ticker, shares, entry_price_eur, entry_fx_rate, "
             "purchase_date, pool) VALUES ('AAPL', 10, 100.0, 1.1, '2024-01-01', 'long_term')"
         )
-        # Intentionally no price_history row for AAPL
 
     response = client.get("/api/charts/pnl-by-ticker")
     data = response.json()
@@ -339,8 +270,8 @@ def test_allocation_with_data(client):
     assert "Short Term" in data["labels"]
     lt_idx = data["labels"].index("Long Term")
     st_idx = data["labels"].index("Short Term")
-    assert data["datasets"][0]["data"][lt_idx] == pytest.approx(1500.0)  # 10 * 150
-    assert data["datasets"][0]["data"][st_idx] == pytest.approx(1100.0)  # 5 * 220
+    assert data["datasets"][0]["data"][lt_idx] == pytest.approx(1500.0)
+    assert data["datasets"][0]["data"][st_idx] == pytest.approx(1100.0)
 
 
 def test_allocation_display_names(client):
@@ -427,7 +358,6 @@ def test_tax_year_with_data(client, monkeypatch):
 
     assert data["datasets"][realized_idx]["data"][0] == pytest.approx(1500.0)
     assert data["datasets"][used_idx]["data"][0] == pytest.approx(750.0)
-    # remaining = max(0, 1270 - 750) = 520
     assert data["datasets"][remaining_idx]["data"][0] == pytest.approx(520.0)
 
 

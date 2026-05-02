@@ -1,16 +1,15 @@
-"""Log file viewer routes for the WealthAgent dashboard."""
+"""Log file viewer API routes for the WealthAgent dashboard."""
 
-import html
 import re
 from datetime import date
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 
 from config.settings import settings
-from dashboard.auth import require_auth
 
-router = APIRouter(prefix="/logs", dependencies=[Depends(require_auth)])
+router = APIRouter(prefix="/api/logs")
 
 _LOG_PATTERN = re.compile(r"^\d{2}-\d{2}-\d{4}\.log$")
 
@@ -34,7 +33,7 @@ def _list_log_files() -> list[dict]:
                 files.append(
                     {
                         "filename": f.name,
-                        "date": log_date,
+                        "date": log_date.isoformat(),
                         "size_kb": round(f.stat().st_size / 1024, 1),
                     }
                 )
@@ -44,35 +43,26 @@ def _list_log_files() -> list[dict]:
 
 
 @router.get("")
-async def list_logs(request: Request):
-    """Render the log files list page."""
+async def list_logs() -> JSONResponse:
+    """Return list of log files as JSON."""
     files = _list_log_files()
-    templates = request.app.state.templates
-    return templates.TemplateResponse(
-        request,
-        "logs/list.html",
-        {"log_files": files},
-    )
+    return JSONResponse({"log_files": files})
 
 
 @router.get("/{filename}")
-async def view_log(request: Request, filename: str):
-    """Render a single log file's contents."""
+async def view_log(filename: str) -> JSONResponse:
+    """Return a single log file's contents as JSON."""
     if not _LOG_PATTERN.match(filename):
         raise HTTPException(status_code=404, detail="Log file not found")
     log_path: Path = settings.log_dir / filename
     if not log_path.exists():
         raise HTTPException(status_code=404, detail="Log file not found")
     content = log_path.read_text(encoding="utf-8", errors="replace")
-    escaped = html.escape(content)
-    lines = escaped.splitlines()
-    templates = request.app.state.templates
-    return templates.TemplateResponse(
-        request,
-        "logs/view.html",
+    lines = content.splitlines()
+    return JSONResponse(
         {
             "filename": filename,
             "lines": lines,
             "line_count": len(lines),
-        },
+        }
     )
