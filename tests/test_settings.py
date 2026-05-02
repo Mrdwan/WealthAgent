@@ -224,11 +224,13 @@ def test_iwda_settings_defaults():
     assert s.iwda_exit_buffer == 5
 
 
-def test_alert_drop_pct_default():
+def test_alert_drop_pct_default(monkeypatch):
     """alert_drop_pct defaults to 15.0 (catastrophic threshold)."""
+    monkeypatch.delenv("ALERT_DROP_PCT", raising=False)
+
     from config.settings import Settings
 
-    s = Settings()
+    s = Settings(_env_file=None)
     assert s.alert_drop_pct == 15.0
 
 
