@@ -170,7 +170,7 @@ def test_purge_data_action_deletes_old_rows(client):
 
     response = test_client.post(
         "/api/purge/data",
-        json={"news_days": 7, "alerts_days": 7, "screener_days": 120, "fundamentals_days": 28},
+        json={"news_days": 7, "alerts_days": 7},
     )
     assert response.status_code == 200
     data = response.json()
@@ -183,7 +183,7 @@ def test_purge_data_action_clamps_minimum_to_1(client):
     test_client, _ = client
     response = test_client.post(
         "/api/purge/data",
-        json={"news_days": 0, "alerts_days": 0, "screener_days": 0, "fundamentals_days": 0},
+        json={"news_days": 0, "alerts_days": 0},
     )
     assert response.status_code == 200
     data = response.json()

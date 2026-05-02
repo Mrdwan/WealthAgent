@@ -384,10 +384,10 @@ def _safe_run(cmd_fn: Callable[[], None], name: str) -> None:
 
 def _monthly_check() -> None:
     """Run monthly pipeline on the 1st of each month at 08:00."""
-    from run_pipeline import cmd_monthly  # noqa: PLC0415
+    from run_pipeline import cmd_iwda  # noqa: PLC0415
 
     if datetime.now().day == 1:
-        _safe_run(cmd_monthly, "monthly")
+        _safe_run(cmd_iwda, "iwda_monthly")
 
 
 def _run_purge_reports() -> None:
@@ -399,7 +399,7 @@ def _run_purge_reports() -> None:
 
 
 def _run_purge_pipeline_data() -> None:
-    """Purge old news, alerts, screener candidates, and fundamentals."""
+    """Purge old news and alerts."""
     from purge import purge_all  # noqa: PLC0415
 
     counts = purge_all()
@@ -408,11 +408,10 @@ def _run_purge_pipeline_data() -> None:
 
 def _setup_schedule() -> None:
     """Register all scheduled pipeline tasks."""
-    from run_pipeline import cmd_daily, cmd_hourly, cmd_weekly  # noqa: PLC0415
+    from run_pipeline import cmd_daily, cmd_hourly  # noqa: PLC0415
 
     schedule.every().hour.do(_safe_run, cmd_hourly, "hourly")
     schedule.every().day.at("06:00").do(_safe_run, cmd_daily, "daily")
-    schedule.every().sunday.at("07:00").do(_safe_run, cmd_weekly, "weekly")
     schedule.every().day.at("08:00").do(_monthly_check)
     schedule.every().day.at("03:00").do(_run_purge_reports)
     schedule.every().day.at("03:05").do(_run_purge_pipeline_data)

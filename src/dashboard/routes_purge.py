@@ -52,8 +52,6 @@ class PurgeDataRequest(BaseModel):
 
     news_days: int
     alerts_days: int
-    screener_days: int
-    fundamentals_days: int
 
 
 @router.post("/logs")
@@ -76,20 +74,14 @@ async def purge_data_action(body: PurgeDataRequest) -> JSONResponse:
     """Delete old pipeline data (news, alerts, screener candidates, fundamentals)."""
     from purge import (  # noqa: PLC0415
         purge_old_alerts,
-        purge_old_fundamentals,
         purge_old_news,
-        purge_old_screener,
     )
 
     news_days = max(1, body.news_days)
     alerts_days = max(1, body.alerts_days)
-    screener_days = max(1, body.screener_days)
-    fundamentals_days = max(1, body.fundamentals_days)
 
     counts = {
         "news": purge_old_news(news_days),
         "alerts": purge_old_alerts(alerts_days),
-        "screener": purge_old_screener(screener_days),
-        "fundamentals": purge_old_fundamentals(fundamentals_days),
     }
     return JSONResponse({"deleted": counts, "total": sum(counts.values())})

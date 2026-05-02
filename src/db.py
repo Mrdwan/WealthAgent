@@ -1,6 +1,5 @@
 """Database initialization and connection management for WealthAgent."""
 
-import contextlib
 import json
 import sqlite3
 from collections.abc import Generator
@@ -49,27 +48,6 @@ class FxRate(BaseModel):
     date: date
     pair: str
     rate: float
-
-
-class Fundamentals(BaseModel):
-    """Fundamental data snapshot for a ticker."""
-
-    id: int | None = None
-    ticker: str
-    fetched_at: datetime
-    pe_ratio: float | None = None
-    ps_ratio: float | None = None
-    revenue_growth: float | None = None
-    profit_margin: float | None = None
-    free_cash_flow: float | None = None
-    debt_to_equity: float | None = None
-    dividend_yield: float | None = None
-    market_cap: float | None = None
-    sector: str | None = None
-    industry: str | None = None
-    country: str | None = None
-    next_earnings: date | None = None
-    raw_json: str | None = None  # full API response
 
 
 class NewsArticle(BaseModel):
@@ -133,25 +111,6 @@ class TaxYear(BaseModel):
     year: int
     realized_gains_eur: float = 0.0
     exemption_used: float = 0.0
-
-
-class ScreenerCandidate(BaseModel):
-    """A stock surfaced by the screener and awaiting review."""
-
-    id: int | None = None
-    ticker: str
-    screened_at: datetime | None = None
-    market_cap: float | None = None
-    revenue_growth: float | None = None
-    pe_ratio: float | None = None
-    sector: str | None = None
-    country: str | None = None
-    llm_score: float | None = Field(None, ge=0.0, le=10.0)
-    llm_thesis: str | None = None
-    llm_risk: str | None = None
-    dividend_yield: float | None = None
-    debt_to_equity: float | None = None
-    status: str = "pending"  # pending | reviewed | added | rejected
 
 
 class AlertLog(BaseModel):
@@ -260,25 +219,6 @@ CREATE TABLE IF NOT EXISTS fx_rates (
     UNIQUE(date, pair)
 );
 
-CREATE TABLE IF NOT EXISTS fundamentals (
-    id              INTEGER PRIMARY KEY,
-    ticker          TEXT NOT NULL,
-    fetched_at      TEXT NOT NULL,
-    pe_ratio        REAL,
-    ps_ratio        REAL,
-    revenue_growth  REAL,
-    profit_margin   REAL,
-    free_cash_flow  REAL,
-    debt_to_equity  REAL,
-    dividend_yield  REAL,
-    market_cap      REAL,
-    sector          TEXT,
-    industry        TEXT,
-    country         TEXT,
-    next_earnings   TEXT,
-    raw_json        TEXT
-);
-
 CREATE TABLE IF NOT EXISTS news_articles (
     id               INTEGER PRIMARY KEY,
     url              TEXT UNIQUE NOT NULL,
@@ -325,21 +265,6 @@ CREATE TABLE IF NOT EXISTS tax_year (
     realized_gains_eur  REAL DEFAULT 0,
     exemption_used      REAL DEFAULT 0,
     UNIQUE(year)
-);
-
-CREATE TABLE IF NOT EXISTS screener_candidates (
-    id              INTEGER PRIMARY KEY,
-    ticker          TEXT NOT NULL,
-    screened_at     TEXT DEFAULT (datetime('now')),
-    market_cap      REAL,
-    revenue_growth  REAL,
-    pe_ratio        REAL,
-    sector          TEXT,
-    country         TEXT,
-    llm_score       REAL CHECK(llm_score IS NULL OR (llm_score >= 0 AND llm_score <= 10)),
-    llm_thesis      TEXT,
-    status          TEXT DEFAULT 'pending'
-                    CHECK(status IN ('pending','reviewed','added','rejected'))
 );
 
 CREATE TABLE IF NOT EXISTS alerts_log (
@@ -395,15 +320,6 @@ def init_db() -> None:
         # executescript issues an implicit COMMIT before running, so DDL is
         # safe even inside an open transaction.
         conn.executescript(_SCHEMA)
-
-        # Migrate: add optional columns to screener_candidates
-        for col, col_type in [
-            ("llm_risk", "TEXT"),
-            ("dividend_yield", "REAL"),
-            ("debt_to_equity", "REAL"),
-        ]:
-            with contextlib.suppress(sqlite3.OperationalError):
-                conn.execute(f"ALTER TABLE screener_candidates ADD COLUMN {col} {col_type}")
 
         conn.execute(
             "INSERT OR IGNORE INTO tax_year (year, realized_gains_eur, exemption_used)"

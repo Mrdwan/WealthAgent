@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta
 
-from db import db_conn, get_conn
+from db import db_conn
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -36,28 +36,9 @@ def _insert_alert(triggered_at: str) -> None:
         )
 
 
-def _insert_screener(screened_at: str) -> None:
-    with db_conn() as conn:
-        conn.execute(
-            "INSERT INTO screener_candidates (ticker, screened_at) VALUES (?, ?)",
-            ("MSFT", screened_at),
-        )
-
-
-def _insert_fundamentals(ticker: str, fetched_at: str) -> None:
-    with db_conn() as conn:
-        conn.execute(
-            "INSERT INTO fundamentals (ticker, fetched_at) VALUES (?, ?)",
-            (ticker, fetched_at),
-        )
-
-
 def _count(table: str) -> int:
-    conn = get_conn()
-    try:
-        return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]  # noqa: S608
-    finally:
-        conn.close()
+    with db_conn() as conn:
+        return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
 
 def _ago(days: int) -> str:
@@ -168,75 +149,6 @@ def test_purge_old_alerts_keeps_all_when_recent():
 
 
 # ---------------------------------------------------------------------------
-# purge_old_screener
-# ---------------------------------------------------------------------------
-
-
-def test_purge_old_screener_deletes_old():
-    from purge import purge_old_screener
-
-    _insert_screener(_ago(150))
-    _insert_screener(_ago(10))
-
-    deleted = purge_old_screener(days=120)
-
-    assert deleted == 1
-    assert _count("screener_candidates") == 1
-
-
-def test_purge_old_screener_keeps_all_when_recent():
-    from purge import purge_old_screener
-
-    _insert_screener(_ago(30))
-
-    deleted = purge_old_screener(days=120)
-
-    assert deleted == 0
-
-
-# ---------------------------------------------------------------------------
-# purge_old_fundamentals
-# ---------------------------------------------------------------------------
-
-
-def test_purge_old_fundamentals_deletes_old_snapshot():
-    from purge import purge_old_fundamentals
-
-    _insert_fundamentals("AAPL", _ago(30))
-    _insert_fundamentals("AAPL", _ago(3))  # latest — must be preserved
-
-    deleted = purge_old_fundamentals(days=7)
-
-    assert deleted == 1
-    assert _count("fundamentals") == 1
-
-
-def test_purge_old_fundamentals_preserves_latest_even_if_stale():
-    from purge import purge_old_fundamentals
-
-    # Only one snapshot, older than retention — must still be kept
-    _insert_fundamentals("NVDA", _ago(60))
-
-    deleted = purge_old_fundamentals(days=7)
-
-    assert deleted == 0
-    assert _count("fundamentals") == 1
-
-
-def test_purge_old_fundamentals_multiple_tickers():
-    from purge import purge_old_fundamentals
-
-    _insert_fundamentals("AAPL", _ago(30))
-    _insert_fundamentals("AAPL", _ago(3))
-    _insert_fundamentals("GOOGL", _ago(30))  # only snapshot — preserved
-
-    deleted = purge_old_fundamentals(days=7)
-
-    assert deleted == 1  # only old AAPL snapshot deleted
-    assert _count("fundamentals") == 2  # recent AAPL + only GOOGL
-
-
-# ---------------------------------------------------------------------------
 # purge_all
 # ---------------------------------------------------------------------------
 
@@ -246,7 +158,7 @@ def test_purge_all_returns_dict_with_all_keys():
 
     result = purge_all()
 
-    assert set(result.keys()) == {"news", "alerts", "screener", "fundamentals"}
+    assert set(result.keys()) == {"news", "alerts"}
 
 
 def test_purge_all_runs_all_purges():
@@ -255,16 +167,11 @@ def test_purge_all_runs_all_purges():
     old_a = _insert_article(_ago(30))
     _insert_signal(old_a, _ago(30))
     _insert_alert(_ago(30))
-    _insert_screener(_ago(200))
-    _insert_fundamentals("AAPL", _ago(30))
-    _insert_fundamentals("AAPL", _ago(3))  # latest — preserved
 
     result = purge_all()
 
     assert result["news"] == 2  # signal + article
     assert result["alerts"] == 1
-    assert result["screener"] == 1
-    assert result["fundamentals"] == 1
 
 
 # ---------------------------------------------------------------------------

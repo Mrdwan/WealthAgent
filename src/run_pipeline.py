@@ -79,20 +79,11 @@ def cmd_daily() -> None:
     cmd_hourly()
 
 
-def cmd_weekly() -> None:
-    """Weekly pipeline: daily tasks + refresh fundamentals."""
-    from fundamentals import fetch_all_fundamentals
+def cmd_iwda() -> None:
+    """Fetch the latest IWDA top-N holdings."""
+    from iwda_fetcher import fetch_iwda_holdings
 
-    cmd_daily()
-    fetch_all_fundamentals()
-
-
-def cmd_monthly() -> None:
-    """Monthly pipeline: weekly tasks + stock screener."""
-    from screener import run_monthly_screen
-
-    cmd_weekly()
-    run_monthly_screen()
+    fetch_iwda_holdings()
 
 
 def cmd_rebalance() -> None:
@@ -119,7 +110,7 @@ def cmd_status() -> None:
 # CLI dispatcher
 # ---------------------------------------------------------------------------
 
-_COMMAND_NAMES = ("hourly", "prices", "daily", "weekly", "monthly", "rebalance", "status")
+_COMMAND_NAMES = ("hourly", "prices", "daily", "iwda", "rebalance", "status")
 
 
 def main() -> None:

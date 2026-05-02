@@ -34,7 +34,7 @@ init_db()
 # ---------------------------------------------------------------------------
 # Now import the fetchers (after DB is ready)
 # ---------------------------------------------------------------------------
-from fundamentals import fetch_fundamentals, get_latest_fundamentals  # noqa: E402
+
 from fx_fetcher import (  # noqa: E402
     fetch_ecb_rates,
     get_latest_rate,
@@ -159,61 +159,6 @@ def test_price_fetcher() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Fundamentals Fetcher tests
-# ---------------------------------------------------------------------------
-
-
-def test_fundamentals() -> None:
-    """Test fundamentals fetching from yfinance."""
-    print("\n=== Fundamentals ===")
-
-    fund = fetch_fundamentals("AAPL")
-    check("AAPL fundamentals fetched", fund is not None)
-
-    if fund:
-        check("Has sector", fund.sector is not None, fund.sector or "")
-        check("Has market cap", fund.market_cap is not None)
-        if fund.market_cap:
-            check(
-                "AAPL cap > $1T",
-                fund.market_cap > 1e12,
-                f"${fund.market_cap / 1e12:.1f}T",
-            )
-        check("Has raw_json", fund.raw_json is not None)
-        check(
-            "raw_json is valid JSON",
-            _is_valid_json(fund.raw_json) if fund.raw_json else False,
-        )
-
-        # Query helper
-        latest = get_latest_fundamentals("AAPL")
-        check("get_latest_fundamentals returns data", latest is not None)
-        if latest:
-            check(
-                "Retrieved ticker matches",
-                latest.ticker == "AAPL",
-                latest.ticker,
-            )
-
-    # Test a non-US ticker
-    fund_uk = fetch_fundamentals("SHEL.L")
-    check("SHEL.L (UK) fundamentals fetched", fund_uk is not None)
-    if fund_uk:
-        check("SHEL.L has country", fund_uk.country is not None, fund_uk.country or "")
-
-
-def _is_valid_json(s: str) -> bool:
-    """Check if a string is valid JSON."""
-    import json
-
-    try:
-        json.loads(s)
-        return True
-    except (json.JSONDecodeError, TypeError):
-        return False
-
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -225,7 +170,6 @@ def main() -> None:
 
     test_fx_fetcher()
     test_price_fetcher()
-    test_fundamentals()
 
     print(f"\n{'=' * 40}")
     print(f"Results: {_passed} passed, {_failed} failed")

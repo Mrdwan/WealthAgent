@@ -116,41 +116,20 @@ def test_cmd_daily(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# cmd_weekly
+# cmd_iwda
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_weekly(monkeypatch):
+def test_cmd_iwda(monkeypatch):
     import run_pipeline
 
-    mock_fund = mock.MagicMock()
-    monkeypatch.setattr(run_pipeline, "cmd_daily", mock.MagicMock())
+    mock_iwda = mock.MagicMock()
 
-    mod = mock.MagicMock(fetch_all_fundamentals=mock_fund)
-    with mock.patch.dict("sys.modules", {"fundamentals": mod}):
-        run_pipeline.cmd_weekly()
+    mod = mock.MagicMock(fetch_iwda_holdings=mock_iwda)
+    with mock.patch.dict("sys.modules", {"iwda_fetcher": mod}):
+        run_pipeline.cmd_iwda()
 
-    run_pipeline.cmd_daily.assert_called_once()
-    mock_fund.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# cmd_monthly
-# ---------------------------------------------------------------------------
-
-
-def test_cmd_monthly(monkeypatch):
-    import run_pipeline
-
-    mock_screen = mock.MagicMock(return_value=5)
-    monkeypatch.setattr(run_pipeline, "cmd_weekly", mock.MagicMock())
-
-    mod = mock.MagicMock(run_monthly_screen=mock_screen)
-    with mock.patch.dict("sys.modules", {"screener": mod}):
-        run_pipeline.cmd_monthly()
-
-    run_pipeline.cmd_weekly.assert_called_once()
-    mock_screen.assert_called_once()
+    mock_iwda.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
