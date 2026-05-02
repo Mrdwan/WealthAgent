@@ -1,9 +1,8 @@
 """Alert engine — checks for conditions requiring attention and logs them.
 
 Checks:
-  - price_drop:   held ticker dropped >N% in the last 30 days
-  - news_signal:  negative signal for held ticker with confidence >= 0.6
-  - opportunity:  positive signal for non-held ticker with confidence >= 0.7
+  - price_drop:   held ticker dropped >N% in the last 30 days (native USD)
+  - iwda_exit:    held ticker has fallen out of IWDA's top-N hysteresis band
 
 CLI usage (inside the container):
     python -m alert_engine
@@ -34,7 +33,7 @@ log = logging.getLogger(__name__)
 class Alert(BaseModel):
     """A triggered alert."""
 
-    type: str  # price_drop | news_signal | opportunity
+    type: str  # price_drop | iwda_exit
     ticker: str | None = None
     details: dict[str, Any]
     triggered_at: datetime
@@ -56,12 +55,15 @@ def _get_held_tickers() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Check: price drops
+# Check: price drops (USD-native, avoids phantom EUR FX moves)
 # ---------------------------------------------------------------------------
 
 
 def check_price_drops(threshold_pct: float | None = None) -> list[Alert]:
     """Check for held tickers that have dropped more than threshold_pct in 30 days.
+
+    Uses ``close_usd`` (native currency) to avoid phantom drops caused by EUR
+    exchange-rate movements.
 
     Args:
         threshold_pct: Drop percentage trigger (default: ALERT_DROP_PCT env var).
@@ -82,8 +84,8 @@ def check_price_drops(threshold_pct: float | None = None) -> list[Alert]:
         for ticker in tickers:
             # Get current price (most recent)
             current_row = conn.execute(
-                "SELECT close_eur, date FROM price_history"
-                " WHERE ticker = ? AND close_eur IS NOT NULL"
+                "SELECT close_usd, date FROM price_history"
+                " WHERE ticker = ? AND close_usd IS NOT NULL"
                 " ORDER BY date DESC LIMIT 1",
                 (ticker,),
             ).fetchone()
@@ -92,14 +94,14 @@ def check_price_drops(threshold_pct: float | None = None) -> list[Alert]:
                 log.debug("No price data for %s — skipping", ticker)
                 continue
 
-            current_price = current_row["close_eur"]
+            current_price = current_row["close_usd"]
             current_date = current_row["date"]
 
             # Get price ~30 days ago (nearest available on or before)
             cutoff = (datetime.now(tz=UTC) - timedelta(days=30)).date().isoformat()
             prior_row = conn.execute(
-                "SELECT close_eur, date FROM price_history"
-                " WHERE ticker = ? AND close_eur IS NOT NULL AND date <= ?"
+                "SELECT close_usd, date FROM price_history"
+                " WHERE ticker = ? AND close_usd IS NOT NULL AND date <= ?"
                 " ORDER BY date DESC LIMIT 1",
                 (ticker, cutoff),
             ).fetchone()
@@ -108,7 +110,7 @@ def check_price_drops(threshold_pct: float | None = None) -> list[Alert]:
                 log.debug("No 30-day-old price for %s — skipping", ticker)
                 continue
 
-            prior_price = prior_row["close_eur"]
+            prior_price = prior_row["close_usd"]
             if prior_price == 0:
                 continue
 
@@ -116,7 +118,7 @@ def check_price_drops(threshold_pct: float | None = None) -> list[Alert]:
 
             if drop_pct <= -threshold:
                 log.warning(
-                    "%s dropped %.1f%% (€%.2f → €%.2f)",
+                    "%s dropped %.1f%% ($%.2f → $%.2f)",
                     ticker,
                     drop_pct,
                     prior_price,
@@ -128,8 +130,8 @@ def check_price_drops(threshold_pct: float | None = None) -> list[Alert]:
                         ticker=ticker,
                         details={
                             "drop_pct": round(drop_pct, 2),
-                            "current_price_eur": round(current_price, 4),
-                            "prior_price_eur": round(prior_price, 4),
+                            "current_price_usd": round(current_price, 4),
+                            "prior_price_usd": round(prior_price, 4),
                             "current_date": current_date,
                             "prior_date": prior_row["date"],
                             "threshold_pct": threshold,
@@ -145,129 +147,61 @@ def check_price_drops(threshold_pct: float | None = None) -> list[Alert]:
 
 
 # ---------------------------------------------------------------------------
-# Check: news signals
+# Check: IWDA exit — ticker fell out of top-N hysteresis band
 # ---------------------------------------------------------------------------
 
 
-def check_news_signals(hours: int = 24) -> list[Alert]:
-    """Check for recent negative signals on held tickers.
+def check_iwda_exits() -> list[Alert]:
+    """Check for held tickers that have exited IWDA's top-N hysteresis band.
 
-    Requires: signal confidence >= 0.6 AND sentiment = 'negative' AND ticker
-    in portfolio.
-
-    Args:
-        hours: Look-back window for signals.
+    Calls ``iwda_fetcher.compute_changes()`` and intersects its ``exited``
+    list with the currently held tickers.  Returns ``[]`` if no IWDA snapshots
+    exist yet (Phase 2 fetcher hasn't run).
 
     Returns:
-        List of Alert objects.
+        List of Alert objects, one per held ticker that exited the band.
     """
-    held = set(_get_held_tickers())
-    if not held:
+    from iwda_fetcher import compute_changes, most_recent_fetched_at
+
+    if most_recent_fetched_at() is None:
+        log.info("No IWDA snapshots available — skipping IWDA exit check.")
         return []
 
-    cutoff = (datetime.now(tz=UTC) - timedelta(hours=hours)).isoformat()
-    conn = get_conn()
-    try:
-        rows = conn.execute(
-            "SELECT * FROM news_signals"
-            " WHERE extracted_at >= ? AND confidence >= 0.6 AND sentiment = 'negative'",
-            (cutoff,),
-        ).fetchall()
-    finally:
-        conn.close()
+    changes = compute_changes()
+    exited = changes.get("exited", [])
+    if not exited:
+        log.info("IWDA exit check: no exits detected.")
+        return []
 
-    alerts: list[Alert] = []
-    for row in rows:
-        try:
-            signal_tickers = json.loads(row["tickers"] or "[]")
-        except (json.JSONDecodeError, TypeError):
-            signal_tickers = []
-
-        overlap = {t.upper() for t in signal_tickers} & {t.upper() for t in held}
-        if not overlap:
-            continue
-
-        for ticker in overlap:
-            alerts.append(
-                Alert(
-                    type="news_signal",
-                    ticker=ticker,
-                    details={
-                        "sentiment": row["sentiment"],
-                        "catalyst": row["catalyst"],
-                        "timeframe": row["timeframe"],
-                        "summary": row["summary"],
-                        "confidence": row["confidence"],
-                        "signal_id": row["id"],
-                        "article_id": row["article_id"],
-                    },
-                    triggered_at=datetime.now(tz=UTC),
-                )
-            )
-
-    log.info("News signal check: %d alert(s) triggered", len(alerts))
-    return alerts
-
-
-# ---------------------------------------------------------------------------
-# Check: opportunities
-# ---------------------------------------------------------------------------
-
-
-def check_opportunities(hours: int = 24) -> list[Alert]:
-    """Check for positive signals on tickers NOT currently held.
-
-    Requires: confidence >= 0.7 AND sentiment = 'positive'.
-
-    Args:
-        hours: Look-back window for signals.
-
-    Returns:
-        List of Alert objects.
-    """
     held = {t.upper() for t in _get_held_tickers()}
-
-    cutoff = (datetime.now(tz=UTC) - timedelta(hours=hours)).isoformat()
-    conn = get_conn()
-    try:
-        rows = conn.execute(
-            "SELECT * FROM news_signals"
-            " WHERE extracted_at >= ? AND confidence >= 0.7 AND sentiment = 'positive'",
-            (cutoff,),
-        ).fetchall()
-    finally:
-        conn.close()
-
     alerts: list[Alert] = []
-    for row in rows:
-        try:
-            signal_tickers = json.loads(row["tickers"] or "[]")
-        except (json.JSONDecodeError, TypeError):
-            signal_tickers = []
 
-        non_held = {t.upper() for t in signal_tickers} - held
-        if not non_held:
+    for item in exited:
+        ticker = item["ticker"]
+        if ticker.upper() not in held:
             continue
-
-        for ticker in non_held:
-            alerts.append(
-                Alert(
-                    type="opportunity",
-                    ticker=ticker,
-                    details={
-                        "sentiment": row["sentiment"],
-                        "catalyst": row["catalyst"],
-                        "timeframe": row["timeframe"],
-                        "summary": row["summary"],
-                        "confidence": row["confidence"],
-                        "signal_id": row["id"],
-                        "article_id": row["article_id"],
-                    },
-                    triggered_at=datetime.now(tz=UTC),
-                )
+        alerts.append(
+            Alert(
+                type="iwda_exit",
+                ticker=ticker,
+                details={
+                    "current_rank": item["current_rank"],
+                    "prior_rank": item["prior_rank"],
+                    "top_n": settings.iwda_top_n,
+                    "exit_buffer": settings.iwda_exit_buffer,
+                },
+                triggered_at=datetime.now(tz=UTC),
             )
+        )
+        log.warning(
+            "%s exited IWDA top-%d band (prior rank: %s, current rank: %s)",
+            ticker,
+            settings.iwda_top_n,
+            item["prior_rank"],
+            item["current_rank"],
+        )
 
-    log.info("Opportunity check: %d alert(s) triggered", len(alerts))
+    log.info("IWDA exit check: %d alert(s) triggered", len(alerts))
     return alerts
 
 
@@ -297,15 +231,14 @@ def _log_alert(alert: Alert) -> None:
 
 
 def run_all_checks() -> list[Alert]:
-    """Run all alert checks, deduplicate by ticker (first wins), and log to DB.
+    """Run all alert checks, deduplicate by (type, ticker) (first wins), log to DB.
 
     Returns:
         Combined deduplicated list of Alert objects.
     """
     all_alerts: list[Alert] = []
     all_alerts.extend(check_price_drops())
-    all_alerts.extend(check_news_signals())
-    all_alerts.extend(check_opportunities())
+    all_alerts.extend(check_iwda_exits())
 
     # Deduplicate: keep first alert per (type, ticker) pair
     seen: set[tuple[str, str | None]] = set()

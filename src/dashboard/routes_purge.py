@@ -1,16 +1,17 @@
-"""Purge control routes for the WealthAgent dashboard."""
+"""Purge control API routes for the WealthAgent dashboard."""
 
 import re
 from datetime import date, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from config.settings import settings
-from dashboard.auth import require_auth
 from reports import purge_expired_reports
 
-router = APIRouter(prefix="/purge", dependencies=[Depends(require_auth)])
+router = APIRouter(prefix="/api/purge")
 
 _LOG_PATTERN = re.compile(r"^\d{2}-\d{2}-\d{4}\.log$")
 
@@ -40,92 +41,47 @@ def _purge_logs(older_than_days: int) -> int:
     return count
 
 
-def _purge_defaults() -> dict:
-    """Return current retention defaults for the purge page template."""
-    return {
-        "news_retention_days": settings.news_retention_days,
-        "alerts_retention_days": settings.alerts_retention_days,
-        "screener_retention_days": settings.screener_retention_days,
-        "fundamentals_retention_days": settings.fundamentals_retention_days,
-    }
+class PurgeLogsRequest(BaseModel):
+    """Request body for log purge."""
+
+    older_than_days: int
 
 
-@router.get("")
-async def purge_page(request: Request):
-    """Render the purge controls page."""
-    templates = request.app.state.templates
-    return templates.TemplateResponse(request, "purge.html", _purge_defaults())
+class PurgeDataRequest(BaseModel):
+    """Request body for pipeline data purge."""
+
+    news_days: int
+    alerts_days: int
 
 
 @router.post("/logs")
-async def purge_logs_action(request: Request, older_than_days: int = Form(...)):
+async def purge_logs_action(body: PurgeLogsRequest) -> JSONResponse:
     """Delete log files older than the specified number of days."""
-    if older_than_days < 1:
-        older_than_days = 1
-    count = _purge_logs(older_than_days)
-    templates = request.app.state.templates
-    return templates.TemplateResponse(
-        request,
-        "purge.html",
-        {
-            **_purge_defaults(),
-            "log_result": f"Deleted {count} log file{'s' if count != 1 else ''}.",
-        },
-    )
+    days = max(1, body.older_than_days)
+    count = _purge_logs(days)
+    return JSONResponse({"deleted": count, "type": "logs"})
 
 
 @router.post("/reports")
-async def purge_reports_action(request: Request):
+async def purge_reports_action() -> JSONResponse:
     """Delete all expired reports."""
     count = purge_expired_reports()
-    templates = request.app.state.templates
-    return templates.TemplateResponse(
-        request,
-        "purge.html",
-        {
-            **_purge_defaults(),
-            "report_result": f"Deleted {count} expired report{'s' if count != 1 else ''}.",
-        },
-    )
+    return JSONResponse({"deleted": count, "type": "reports"})
 
 
 @router.post("/data")
-async def purge_data_action(
-    request: Request,
-    news_days: int = Form(...),
-    alerts_days: int = Form(...),
-    screener_days: int = Form(...),
-    fundamentals_days: int = Form(...),
-):
+async def purge_data_action(body: PurgeDataRequest) -> JSONResponse:
     """Delete old pipeline data (news, alerts, screener candidates, fundamentals)."""
     from purge import (  # noqa: PLC0415
         purge_old_alerts,
-        purge_old_fundamentals,
         purge_old_news,
-        purge_old_screener,
     )
 
-    news_days = max(1, news_days)
-    alerts_days = max(1, alerts_days)
-    screener_days = max(1, screener_days)
-    fundamentals_days = max(1, fundamentals_days)
+    news_days = max(1, body.news_days)
+    alerts_days = max(1, body.alerts_days)
 
     counts = {
         "news": purge_old_news(news_days),
         "alerts": purge_old_alerts(alerts_days),
-        "screener": purge_old_screener(screener_days),
-        "fundamentals": purge_old_fundamentals(fundamentals_days),
     }
-    total = sum(counts.values())
-    templates = request.app.state.templates
-    return templates.TemplateResponse(
-        request,
-        "purge.html",
-        {
-            **_purge_defaults(),
-            "data_result": (
-                f"Deleted {total} rows — news: {counts['news']}, alerts: {counts['alerts']},"
-                f" screener: {counts['screener']}, fundamentals: {counts['fundamentals']}."
-            ),
-        },
-    )
+    return JSONResponse({"deleted": counts, "total": sum(counts.values())})

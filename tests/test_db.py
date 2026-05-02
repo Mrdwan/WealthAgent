@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import pytest
 from pydantic import ValidationError
 
-from db import AlertConfig, NewsSignal, Report, db_conn, get_conn, init_db
+from db import AlertConfig, IwdaHolding, NewsSignal, Report, db_conn, get_conn, init_db
 
 
 def test_tickers_json():
@@ -110,3 +110,82 @@ def test_alert_config_model():
     cfg = AlertConfig(key="alert_drop_pct", value="5.0")
     assert cfg.key == "alert_drop_pct"
     assert cfg.value == "5.0"
+
+
+def test_iwda_holding_model():
+    """IwdaHolding model accepts valid fields and defaults id to None."""
+    now = datetime(2025, 5, 1, 12, 0, 0)
+    holding = IwdaHolding(
+        ticker="AAPL",
+        name="Apple Inc.",
+        weight_pct=5.23,
+        rank=1,
+        fetched_at=now,
+    )
+    assert holding.id is None
+    assert holding.ticker == "AAPL"
+    assert holding.name == "Apple Inc."
+    assert holding.weight_pct == 5.23
+    assert holding.rank == 1
+    assert holding.fetched_at == now
+
+
+def test_iwda_holding_model_with_id():
+    """IwdaHolding model accepts an explicit id."""
+    now = datetime(2025, 5, 1, 12, 0, 0)
+    holding = IwdaHolding(
+        id=42,
+        ticker="MSFT",
+        name="Microsoft Corp.",
+        weight_pct=4.10,
+        rank=2,
+        fetched_at=now,
+    )
+    assert holding.id == 42
+
+
+def test_init_db_creates_iwda_holdings_table():
+    """iwda_holdings table exists after init_db()."""
+    init_db()
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='iwda_holdings'"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert len(rows) == 1
+
+
+def test_init_db_creates_iwda_holdings_index():
+    """idx_iwda_holdings_fetched_at index exists after init_db()."""
+    init_db()
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master"
+            " WHERE type='index' AND name='idx_iwda_holdings_fetched_at'"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert len(rows) == 1
+
+
+def test_iwda_holdings_unique_constraint():
+    """Inserting duplicate (ticker, fetched_at) raises an IntegrityError."""
+    import sqlite3
+
+    fetched_at = "2025-05-01T12:00:00"
+    with db_conn() as conn:
+        conn.execute(
+            "INSERT INTO iwda_holdings (ticker, name, weight_pct, rank, fetched_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            ("AAPL", "Apple Inc.", 5.23, 1, fetched_at),
+        )
+
+    with pytest.raises(sqlite3.IntegrityError), db_conn() as conn:
+        conn.execute(
+            "INSERT INTO iwda_holdings (ticker, name, weight_pct, rank, fetched_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            ("AAPL", "Apple Inc.", 5.23, 1, fetched_at),
+        )

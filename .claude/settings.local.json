@@ -14,7 +14,14 @@
       "Bash(git status:*)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
-      "Bash(uv add:*)"
+      "Bash(uv add:*)",
+      "Bash(git -C /Users/radwan/dev/WealthAgent status)",
+      "Bash(git -C /Users/radwan/dev/WealthAgent log --oneline -5)",
+      "Bash(git -C /Users/radwan/dev/WealthAgent add config/settings.py src/db.py tests/conftest.py tests/test_db.py tests/test_settings.py)",
+      "Bash(git -C /Users/radwan/dev/WealthAgent add src/iwda_fetcher.py tests/test_iwda_fetcher.py pyproject.toml uv.lock tests/conftest.py)",
+      "Bash(git -C /Users/radwan/dev/WealthAgent commit -m ' *)",
+      "Bash(git -C /Users/radwan/dev/WealthAgent diff --stat)",
+      "Bash(git -C /Users/radwan/dev/WealthAgent add src/telegram_bot.py tests/test_telegram_bot.py)"
     ]
   }
 }

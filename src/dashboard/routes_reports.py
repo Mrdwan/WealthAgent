@@ -1,49 +1,54 @@
-"""Report list and detail routes for the WealthAgent dashboard."""
+"""Report list and detail API routes for the WealthAgent dashboard."""
 
-import markdown as md
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 
-from dashboard.auth import require_auth
 from reports import count_reports, get_report, list_reports
 
-router = APIRouter(prefix="/reports", dependencies=[Depends(require_auth)])
+router = APIRouter(prefix="/api/reports")
 
 _PER_PAGE = 20
 
 
 @router.get("")
-async def list_reports_page(request: Request, page: int = 1):
-    """Render the reports list page."""
+async def list_reports_endpoint(page: int = 1) -> JSONResponse:
+    """Return paginated list of reports as JSON."""
     offset = (page - 1) * _PER_PAGE
     report_list = list_reports(limit=_PER_PAGE, offset=offset)
     total = count_reports()
     total_pages = max(1, (total + _PER_PAGE - 1) // _PER_PAGE)
-    templates = request.app.state.templates
-    return templates.TemplateResponse(
-        request,
-        "reports/list.html",
+    return JSONResponse(
         {
-            "reports": report_list,
+            "reports": [
+                {
+                    "id": r.id,
+                    "created_at": str(r.created_at),
+                    "report_type": r.report_type,
+                    "ticker": r.ticker,
+                    "summary": r.summary,
+                }
+                for r in report_list
+            ],
             "page": page,
             "total_pages": total_pages,
             "total": total,
-        },
+        }
     )
 
 
 @router.get("/{report_id}")
-async def report_detail(request: Request, report_id: int):
-    """Render the report detail page."""
+async def report_detail(report_id: int) -> JSONResponse:
+    """Return a single report as JSON (full_content included)."""
     report = get_report(report_id)
     if report is None:
         raise HTTPException(status_code=404, detail="Report not found")
-    content_html = md.markdown(report.full_content, extensions=["fenced_code", "nl2br"])
-    templates = request.app.state.templates
-    return templates.TemplateResponse(
-        request,
-        "reports/detail.html",
+    return JSONResponse(
         {
-            "report": report,
-            "content_html": content_html,
-        },
+            "id": report.id,
+            "created_at": str(report.created_at),
+            "report_type": report.report_type,
+            "ticker": report.ticker,
+            "summary": report.summary,
+            "full_content": report.full_content,
+        }
     )

@@ -1,74 +1,51 @@
-"""FastAPI application factory for the WealthAgent dashboard."""
+"""FastAPI application factory for the WealthAgent dashboard.
+
+Serves a JSON API for the React SPA frontend.  The built React app is
+served as static files at ``/`` (fallback to ``index.html`` for client-side
+routing).  No authentication is required — the dashboard is local-network only.
+"""
 
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, Form, Request
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 
 from config.settings import settings
-from dashboard.auth import create_session_token, verify_password
 from dashboard.routes_alerts import router as alerts_router
 from dashboard.routes_charts import router as charts_router
+from dashboard.routes_iwda import router as iwda_router
 from dashboard.routes_logs import router as logs_router
 from dashboard.routes_purge import router as purge_router
 from dashboard.routes_reports import router as reports_router
 
-_STATIC_DIR = Path(__file__).resolve().parent / "static"
-_TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+_SPA_DIR = Path(__file__).resolve().parent / "spa"
 
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
-    _STATIC_DIR.mkdir(parents=True, exist_ok=True)
-    _TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
-
     app = FastAPI(title="WealthAgent Dashboard")
 
-    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
-
-    templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
-    app.state.templates = templates
-
-    @app.get("/")
-    async def root() -> RedirectResponse:
-        """Redirect root to /reports."""
-        return RedirectResponse(url="/reports", status_code=302)
-
-    @app.get("/login")
-    async def get_login(request: Request):
-        """Render the login page."""
-        return templates.TemplateResponse(request, "login.html")
-
-    @app.post("/login")
-    async def post_login(request: Request, password: str = Form(...)):
-        """Authenticate and set session cookie, or re-render login with error."""
-        if verify_password(password):
-            token = create_session_token()
-            response = RedirectResponse(url="/reports", status_code=302)
-            response.set_cookie("wa_session", token, httponly=True, samesite="lax")
-            return response
-        return templates.TemplateResponse(
-            request,
-            "login.html",
-            {"error": "Invalid password"},
-            status_code=401,
-        )
-
-    @app.get("/logout")
-    async def logout() -> RedirectResponse:
-        """Clear session cookie and redirect to login."""
-        response = RedirectResponse(url="/login", status_code=302)
-        response.delete_cookie("wa_session")
-        return response
-
+    # JSON API routers
     app.include_router(reports_router)
     app.include_router(logs_router)
     app.include_router(purge_router)
     app.include_router(charts_router)
     app.include_router(alerts_router)
+    app.include_router(iwda_router)
+
+    # Serve React SPA build (if it exists)
+    if _SPA_DIR.exists():  # pragma: no cover
+        app.mount("/assets", StaticFiles(directory=str(_SPA_DIR / "assets")), name="spa-assets")
+
+        @app.get("/{full_path:path}")
+        async def spa_fallback(full_path: str) -> FileResponse:
+            """Serve the React SPA — fallback all non-API routes to index.html."""
+            file_path = _SPA_DIR / full_path
+            if file_path.is_file():
+                return FileResponse(file_path)
+            return FileResponse(_SPA_DIR / "index.html")
 
     return app
 

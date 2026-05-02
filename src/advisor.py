@@ -14,11 +14,14 @@ CLI usage (inside the container):
 import json
 import logging
 import sys
+from enum import StrEnum
 from pathlib import Path
+from typing import Literal
 
 import requests
 from pydantic import BaseModel
 
+import advisor_validator
 from config.settings import settings
 from context_builder import build_context
 
@@ -39,7 +42,7 @@ _FALLBACK_SYSTEM_PROMPT = (
 
 _REQUEST_TIMEOUT = 300
 
-# Appended to user messages that expect a structured JSON response.
+# Appended to user messages that expect a structured JSON response (for analyze_opportunity).
 _JSON_FORMAT_INSTRUCTION = (
     "\n\nIMPORTANT: Respond with a single valid JSON object — no text outside it, "
     "no markdown fences. Use exactly these two keys:\n"
@@ -49,8 +52,117 @@ _JSON_FORMAT_INSTRUCTION = (
 )
 
 
+# ---------------------------------------------------------------------------
+# MonthlyRebalance schema
+# ---------------------------------------------------------------------------
+
+
+class GapAction(StrEnum):
+    """How the portfolio weight compares to the IWDA index weight."""
+
+    ADD = "ADD"  # underweight vs index
+    HOLD = "HOLD"  # within ±10% of index weight
+    OVERWEIGHT = "OVERWEIGHT"  # more than 10% over index weight
+    NEW = "NEW"  # in current top-N, not yet in portfolio
+    EXITED = "EXITED"  # was in top-N, now out (with hysteresis)
+
+
+class SellReason(StrEnum):
+    """Permitted reasons for a sell recommendation."""
+
+    TAX_HARVESTING = "tax_harvesting"
+    CATASTROPHE = "catastrophe"
+    DEEP_INDEX_EXIT = "deep_index_exit"
+
+
+class IwdaPosition(BaseModel):
+    """A single position in the IWDA top-N index snapshot."""
+
+    rank: int
+    ticker: str
+    name: str
+    weight_pct: float
+
+
+class GapEntry(BaseModel):
+    """Portfolio weight vs IWDA index weight for one ticker."""
+
+    ticker: str
+    portfolio_pct: float  # stocks-only weight (current)
+    index_pct: float  # IWDA weight
+    gap_pct: float  # portfolio_pct - index_pct (negative = underweight)
+    action: GapAction
+
+
+class Allocation(BaseModel):
+    """A single buy order within the monthly stock allocation."""
+
+    ticker: str
+    amount_eur: float  # >= 0; sum across allocations <= 1050
+    rationale: str  # one short sentence
+
+
+class BufferDecision(BaseModel):
+    """The monthly buffer allocation decision."""
+
+    amount_eur: float  # >= 0, <= 500
+    target: str  # ticker, "commodity:silver", or descriptive string
+    rationale: str
+
+
+class LegacyHoldingDecision(BaseModel):
+    """Advisor decision for a legacy holding not in the current IWDA top-N."""
+
+    ticker: str
+    decision: Literal["hold", "trim", "sell"]
+    reason: str
+
+
+class SellRecommendation(BaseModel):
+    """A specific sell recommendation with tax calculations."""
+
+    ticker: str
+    shares: float
+    reason: SellReason
+    realized_gain_eur: float  # the LLM's estimate from context data
+    cgt_due_eur: float
+    net_proceeds_eur: float
+
+
+class TrackingErrorReport(BaseModel):
+    """30-day tracking error: portfolio stocks-only vs IWDA.L."""
+
+    portfolio_return_pct: float | None
+    iwda_return_pct: float | None
+    tracking_error_pp: float | None  # portfolio - iwda; null if insufficient data
+    explanation: str  # one or two sentences
+
+
+class TaxSummary(BaseModel):
+    """Irish CGT position for the current tax year."""
+
+    realized_gains_ytd_eur: float
+    exemption_used_eur: float
+    exemption_remaining_eur: float
+
+
+class MonthlyRebalance(BaseModel):
+    """Structured monthly rebalance recommendation from the advisor LLM."""
+
+    summary: str  # one short line for Telegram, max 200 chars
+    report: str  # full markdown commentary; the bot still uses this
+    iwda_top_n: list[IwdaPosition]
+    portfolio_vs_index: list[GapEntry]
+    stock_allocation: list[Allocation]
+    buffer_recommendation: BufferDecision
+    legacy_holdings: list[LegacyHoldingDecision]
+    sell_recommendations: list[SellRecommendation]
+    tracking_error: TrackingErrorReport
+    tax_summary: TaxSummary
+
+
 class AdvisorResponse(BaseModel):
-    """Structured response from the advisor LLM."""
+    """Structured response from the advisor LLM (used by analyze_opportunity)."""
 
     summary: str
     report: str
@@ -73,7 +185,7 @@ def _load_system_prompt() -> str:
 
 
 # ---------------------------------------------------------------------------
-# LLM call
+# LLM calls
 # ---------------------------------------------------------------------------
 
 
@@ -136,6 +248,89 @@ def _call_llm(system_prompt: str, user_message: str) -> str:
     return content
 
 
+def _call_llm_structured(
+    system_prompt: str,
+    user_message: str,
+    schema_dict: dict,
+) -> dict | None:
+    """Call the advisor LLM with response_format=json_schema and return the parsed dict.
+
+    Posts with structured output enforced via response_format.  On a requests
+    exception or invalid JSON, logs a warning and returns None so the caller
+    can fall back.
+
+    Args:
+        system_prompt: The system prompt text.
+        user_message: The user message text.
+        schema_dict: The JSON schema dict (from Pydantic's model_json_schema).
+
+    Returns:
+        Parsed dict on success, or None on error.
+    """
+    if not settings.advisor_base_url:
+        log.warning("ADVISOR_BASE_URL is not set — cannot call advisor LLM")
+        return None
+
+    base = settings.advisor_base_url
+    needs_key = "ollama" not in base
+    if needs_key and not settings.advisor_api_key:
+        log.warning("ADVISOR_API_KEY is not set for non-Ollama endpoint %s", base)
+        return None
+
+    url = f"{base.rstrip('/')}/chat/completions"
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if settings.advisor_api_key:
+        headers["Authorization"] = f"Bearer {settings.advisor_api_key}"
+
+    payload: dict = {
+        "model": settings.advisor_model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ],
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "MonthlyRebalance",
+                "schema": schema_dict,
+                "strict": True,
+            },
+        },
+    }
+
+    log.info(
+        "Calling advisor LLM (structured): model=%s url=%s",
+        settings.advisor_model,
+        url,
+    )
+
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=_REQUEST_TIMEOUT)
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        log.warning("Structured LLM call failed: %s", exc)
+        return None
+
+    data = resp.json()
+
+    usage = data.get("usage", {})
+    log.info(
+        "Advisor tokens: input=%d output=%d total=%d",
+        usage.get("prompt_tokens", 0),
+        usage.get("completion_tokens", 0),
+        usage.get("total_tokens", 0),
+    )
+
+    content = data["choices"][0]["message"]["content"]
+    log.info("Advisor structured response: %d chars", len(content))
+
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError as exc:
+        log.warning("Failed to parse structured LLM response as JSON: %s", exc)
+        return None
+
+
 def _parse_advisor_response(content: str) -> AdvisorResponse:
     """Parse a JSON advisor response into an AdvisorResponse.
 
@@ -156,24 +351,133 @@ def _parse_advisor_response(content: str) -> AdvisorResponse:
         return AdvisorResponse(summary="", report=content)
 
 
+def _inline_refs(schema: object) -> object:
+    """Inline all $ref references in a JSON schema dict.
+
+    Pydantic generates schemas with $defs and $ref pointers.  Some providers
+    reject strict-mode schemas with $ref.  This function recursively resolves
+    all $ref entries using the top-level $defs map and returns a flat schema.
+
+    Args:
+        schema: A JSON schema value (dict, list, or scalar).
+
+    Returns:
+        The schema with all $ref values replaced by their inlined definitions.
+    """
+    defs: dict = schema.get("$defs", {}) if isinstance(schema, dict) else {}
+
+    def _resolve(node: object) -> object:
+        if isinstance(node, dict):
+            if "$ref" in node:
+                ref_name = node["$ref"].split("/")[-1]
+                resolved = defs.get(ref_name, node)
+                return _resolve(resolved)
+            return {k: _resolve(v) for k, v in node.items() if k != "$defs"}
+        if isinstance(node, list):
+            return [_resolve(item) for item in node]
+        return node
+
+    result = _resolve(schema)
+    if isinstance(result, dict):
+        result.pop("$defs", None)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 
-def monthly_rebalance() -> AdvisorResponse:
+def monthly_rebalance() -> MonthlyRebalance:
     """Generate a monthly rebalance recommendation.
 
-    Builds the full portfolio context and asks the advisor LLM for
-    buy/sell/hold recommendations with reasoning.
+    Builds the full portfolio context, calls the advisor LLM with structured
+    JSON output (response_format=json_schema), validates the result against
+    DB state and strategy rules, and returns a MonthlyRebalance model.
+
+    Validation errors are logged and appended to the summary so Phase 7 can
+    surface them in Telegram.  The LLM's best-effort result is always returned
+    — we never retry the LLM call.
     """
     system = _load_system_prompt()
     context = build_context()
     user_msg = (
-        "Monthly rebalance review. Analyse my portfolio and give specific "
-        "recommendations.\n\nPORTFOLIO STATE:\n\n" + context + _JSON_FORMAT_INSTRUCTION
+        "Monthly rebalance review. Analyse my portfolio and produce the structured "
+        "MonthlyRebalance JSON.\n\nPORTFOLIO STATE:\n\n" + context
     )
-    return _parse_advisor_response(_call_llm(system, user_msg))
+
+    raw_schema = MonthlyRebalance.model_json_schema()
+    flat_schema = _inline_refs(raw_schema)
+
+    parsed_dict = _call_llm_structured(system, user_msg, flat_schema)
+
+    if parsed_dict is None:
+        log.warning("Structured LLM call returned None — returning minimal fallback")
+        return MonthlyRebalance(
+            summary="⚠️ advisor unavailable — check configuration",
+            report="Advisor LLM call failed. Check ADVISOR_BASE_URL and ADVISOR_API_KEY.",
+            iwda_top_n=[],
+            portfolio_vs_index=[],
+            stock_allocation=[],
+            buffer_recommendation=BufferDecision(
+                amount_eur=0.0, target="", rationale="LLM unavailable"
+            ),
+            legacy_holdings=[],
+            sell_recommendations=[],
+            tracking_error=TrackingErrorReport(
+                portfolio_return_pct=None,
+                iwda_return_pct=None,
+                tracking_error_pp=None,
+                explanation="LLM unavailable",
+            ),
+            tax_summary=TaxSummary(
+                realized_gains_ytd_eur=0.0,
+                exemption_used_eur=0.0,
+                exemption_remaining_eur=0.0,
+            ),
+        )
+
+    try:
+        rebalance = MonthlyRebalance.model_validate(parsed_dict)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Failed to validate LLM response against MonthlyRebalance schema: %s", exc)
+        return MonthlyRebalance(
+            summary="⚠️ advisor response failed schema validation",
+            report=(
+                f"LLM response did not match MonthlyRebalance schema:\n{exc}"
+                f"\n\nRaw response:\n{json.dumps(parsed_dict, indent=2)}"
+            ),
+            iwda_top_n=[],
+            portfolio_vs_index=[],
+            stock_allocation=[],
+            buffer_recommendation=BufferDecision(
+                amount_eur=0.0, target="", rationale="schema validation failed"
+            ),
+            legacy_holdings=[],
+            sell_recommendations=[],
+            tracking_error=TrackingErrorReport(
+                portfolio_return_pct=None,
+                iwda_return_pct=None,
+                tracking_error_pp=None,
+                explanation="schema validation failed",
+            ),
+            tax_summary=TaxSummary(
+                realized_gains_ytd_eur=0.0,
+                exemption_used_eur=0.0,
+                exemption_remaining_eur=0.0,
+            ),
+        )
+
+    errors = advisor_validator.validate(rebalance)
+    if errors:
+        for err in errors:
+            log.warning("MonthlyRebalance validation error: %s", err)
+        flagged = "; ".join(errors)
+        rebalance = rebalance.model_copy(
+            update={"summary": rebalance.summary + f" ⚠️ validation flagged: {flagged}"}
+        )
+
+    return rebalance
 
 
 def analyze_alert(alert_details: str) -> str:

@@ -1,4 +1,4 @@
-"""Unit tests for src/dashboard/routes_alerts.py."""
+"""Unit tests for src/dashboard/routes_alerts.py (JSON API)."""
 
 from datetime import datetime, timedelta
 
@@ -9,23 +9,8 @@ from db import db_conn
 
 
 @pytest.fixture()
-def client(monkeypatch):
-    """Authenticated TestClient for dashboard alerts routes."""
-    monkeypatch.setattr("config.settings.settings.dashboard_secret_key", "testpassword")
-    from dashboard.app import create_app
-    from dashboard.auth import create_session_token
-
-    app = create_app()
-    c = TestClient(app, follow_redirects=False)
-    token = create_session_token()
-    c.cookies.set("wa_session", token)
-    return c
-
-
-@pytest.fixture()
-def unauth_client(monkeypatch):
-    """Unauthenticated TestClient."""
-    monkeypatch.setattr("config.settings.settings.dashboard_secret_key", "testpassword")
+def client():
+    """TestClient for dashboard alerts routes (no auth needed)."""
     from dashboard.app import create_app
 
     app = create_app()
@@ -33,49 +18,20 @@ def unauth_client(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Auth guards
-# ---------------------------------------------------------------------------
-
-
-def test_alerts_list_requires_auth(unauth_client):
-    response = unauth_client.get("/alerts")
-    assert response.status_code == 302
-    assert "/login" in response.headers["location"]
-
-
-def test_alerts_config_requires_auth(unauth_client):
-    response = unauth_client.get("/alerts/config")
-    assert response.status_code == 302
-    assert "/login" in response.headers["location"]
-
-
-def test_update_alerts_config_requires_auth(unauth_client):
-    response = unauth_client.post(
-        "/alerts/config",
-        data={
-            "alert_drop_pct": "10.0",
-            "stop_loss_pct": "8.0",
-            "dividend_yield_max": "2.0",
-        },
-    )
-    assert response.status_code == 302
-    assert "/login" in response.headers["location"]
-
-
-# ---------------------------------------------------------------------------
-# GET /alerts — list
+# GET /api/alerts — list
 # ---------------------------------------------------------------------------
 
 
 def test_alerts_list_empty(client):
-    """No alerts → shows empty message."""
-    response = client.get("/alerts")
+    """No alerts → returns empty list."""
+    response = client.get("/api/alerts")
     assert response.status_code == 200
-    assert "No alerts in the last 30 days." in response.text
+    data = response.json()
+    assert data["alerts"] == []
 
 
 def test_alerts_list_shows_recent(client):
-    """2 recent alerts appear in the table."""
+    """2 recent alerts appear in the response."""
     now = datetime.now().isoformat()
     with db_conn() as conn:
         conn.execute(
@@ -89,12 +45,12 @@ def test_alerts_list_shows_recent(client):
             (now, "MSFT", "news_signal", "negative news"),
         )
 
-    response = client.get("/alerts")
+    response = client.get("/api/alerts")
     assert response.status_code == 200
-    assert "AAPL" in response.text
-    assert "MSFT" in response.text
-    assert "price_drop" in response.text
-    assert "news_signal" in response.text
+    data = response.json()
+    tickers = [a["ticker"] for a in data["alerts"]]
+    assert "AAPL" in tickers
+    assert "MSFT" in tickers
 
 
 def test_alerts_list_excludes_old(client):
@@ -107,14 +63,15 @@ def test_alerts_list_excludes_old(client):
             (old_at, "OLD", "price_drop", "very old"),
         )
 
-    response = client.get("/alerts")
+    response = client.get("/api/alerts")
     assert response.status_code == 200
-    assert "OLD" not in response.text
-    assert "No alerts in the last 30 days." in response.text
+    data = response.json()
+    tickers = [a["ticker"] for a in data["alerts"]]
+    assert "OLD" not in tickers
 
 
 # ---------------------------------------------------------------------------
-# GET /alerts/config — configuration form
+# GET /api/alerts/config — configuration
 # ---------------------------------------------------------------------------
 
 
@@ -124,15 +81,16 @@ def test_alerts_config_shows_defaults(client, monkeypatch):
     monkeypatch.setattr("config.settings.settings.stop_loss_pct", 8.0)
     monkeypatch.setattr("config.settings.settings.dividend_yield_max", 2.0)
 
-    response = client.get("/alerts/config")
+    response = client.get("/api/alerts/config")
     assert response.status_code == 200
-    assert "10.0" in response.text
-    assert "8.0" in response.text
-    assert "2.0" in response.text
+    data = response.json()
+    assert data["config"]["alert_drop_pct"] == "10.0"
+    assert data["config"]["stop_loss_pct"] == "8.0"
+    assert data["config"]["dividend_yield_max"] == "2.0"
 
 
 def test_alerts_config_shows_saved_values(client):
-    """After saving to DB, the form shows the DB values."""
+    """After saving to DB, the endpoint shows the DB values."""
     with db_conn() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO alert_config (key, value) VALUES (?, ?)",
@@ -147,37 +105,32 @@ def test_alerts_config_shows_saved_values(client):
             ("dividend_yield_max", "3.5"),
         )
 
-    response = client.get("/alerts/config")
+    response = client.get("/api/alerts/config")
     assert response.status_code == 200
-    assert "15.0" in response.text
-    assert "12.0" in response.text
-    assert "3.5" in response.text
-
-
-def test_alerts_config_shows_saved_message(client):
-    """GET /alerts/config?saved=1 → shows 'Settings saved.' message."""
-    response = client.get("/alerts/config?saved=1")
-    assert response.status_code == 200
-    assert "Settings saved." in response.text
+    data = response.json()
+    assert data["config"]["alert_drop_pct"] == "15.0"
+    assert data["config"]["stop_loss_pct"] == "12.0"
+    assert data["config"]["dividend_yield_max"] == "3.5"
 
 
 # ---------------------------------------------------------------------------
-# POST /alerts/config — update thresholds
+# POST /api/alerts/config — update thresholds
 # ---------------------------------------------------------------------------
 
 
 def test_update_alerts_config_saves(client):
-    """POST saves values to DB and redirects with saved=1."""
+    """POST saves values to DB and returns ok status."""
     response = client.post(
-        "/alerts/config",
-        data={
+        "/api/alerts/config",
+        json={
             "alert_drop_pct": "12.5",
             "stop_loss_pct": "9.0",
             "dividend_yield_max": "4.0",
         },
     )
-    assert response.status_code == 302
-    assert "/alerts/config?saved=1" in response.headers["location"]
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
 
     # Verify DB was updated
     from dashboard.routes_alerts import _get_alert_config

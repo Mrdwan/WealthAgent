@@ -64,49 +64,6 @@ def purge_old_alerts(days: int | None = None) -> int:
     return deleted
 
 
-def purge_old_screener(days: int | None = None) -> int:
-    """Delete screener candidates older than *days* days.
-
-    Returns the number of rows deleted.
-    """
-    retention = days if days is not None else settings.screener_retention_days
-    cutoff = (datetime.now() - timedelta(days=retention)).isoformat()
-    with db_conn() as conn:
-        cur = conn.execute(
-            "DELETE FROM screener_candidates WHERE screened_at < ?",
-            (cutoff,),
-        )
-        deleted = cur.rowcount
-    log.info("purge_old_screener: deleted %d rows (retention=%d days)", deleted, retention)
-    return deleted
-
-
-def purge_old_fundamentals(days: int | None = None) -> int:
-    """Delete old fundamentals snapshots older than *days* days.
-
-    The most recent snapshot per ticker is always preserved regardless of age,
-    so the advisor always has at least one fundamentals row per holding.
-
-    Returns the number of rows deleted.
-    """
-    retention = days if days is not None else settings.fundamentals_retention_days
-    cutoff = (datetime.now() - timedelta(days=retention)).isoformat()
-    with db_conn() as conn:
-        cur = conn.execute(
-            """
-            DELETE FROM fundamentals
-            WHERE fetched_at < ?
-              AND (ticker, fetched_at) NOT IN (
-                  SELECT ticker, MAX(fetched_at) FROM fundamentals GROUP BY ticker
-              )
-            """,
-            (cutoff,),
-        )
-        deleted = cur.rowcount
-    log.info("purge_old_fundamentals: deleted %d rows (retention=%d days)", deleted, retention)
-    return deleted
-
-
 def purge_all() -> dict[str, int]:
     """Run all pipeline purge functions with configured retention periods.
 
@@ -115,8 +72,6 @@ def purge_all() -> dict[str, int]:
     return {
         "news": purge_old_news(),
         "alerts": purge_old_alerts(),
-        "screener": purge_old_screener(),
-        "fundamentals": purge_old_fundamentals(),
     }
 
 

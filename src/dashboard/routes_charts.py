@@ -1,15 +1,14 @@
-"""Chart data API and page routes for the WealthAgent dashboard."""
+"""Chart data API routes for the WealthAgent dashboard."""
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from config.settings import settings
-from dashboard.auth import require_auth
 from db import get_conn
 
-router = APIRouter(dependencies=[Depends(require_auth)])
+router = APIRouter()
 
 _POOL_DISPLAY_NAMES: dict[str, str] = {
     "long_term": "Long Term",
@@ -25,13 +24,6 @@ _POOL_COLORS: dict[str, str] = {
 
 _COLOR_POSITIVE = "rgba(34, 197, 94, 0.7)"
 _COLOR_NEGATIVE = "rgba(239, 68, 68, 0.7)"
-
-
-@router.get("/charts")
-async def charts_page(request: Request):
-    """Render the charts dashboard page."""
-    templates = request.app.state.templates
-    return templates.TemplateResponse(request, "charts.html", {"now": datetime.now()})
 
 
 @router.get("/api/charts/portfolio-value")

@@ -1,7 +1,8 @@
 """Telegram bot — command handlers and scheduled tasks for WealthAgent.
 
-Handles /status, /rebalance, /analyze, and /help commands via python-telegram-bot.
-Runs scheduled pipeline tasks (hourly, daily, weekly, monthly) in a background thread.
+Handles /status, /rebalance, /analyze, /update_iwda, and /help commands via
+python-telegram-bot. Runs scheduled pipeline tasks (hourly, daily, weekly,
+monthly) in a background thread.
 
 If TELEGRAM_BOT_TOKEN is not set, runs in scheduler-only mode with console output.
 """
@@ -34,6 +35,7 @@ WealthAgent commands:
 /sell TICKER SHARES PRICE_EUR — record a sell
 /rebalance — AI rebalance recommendations (30+ seconds)
 /analyze TICKER — deep analysis of a ticker (30+ seconds)
+/update_iwda — manually refresh the IWDA top-N snapshot
 /help — show this message\
 """
 
@@ -44,6 +46,14 @@ _TELEGRAM_MAX = 4096
 
 # Thread pool for blocking LLM calls — limited to 2 workers to conserve Pi resources
 _executor = ThreadPoolExecutor(max_workers=2)
+
+_ACTION_EMOJI = {
+    "ADD": "⬇️",
+    "HOLD": "✅",
+    "OVERWEIGHT": "⬆️",
+    "NEW": "🆕",
+    "EXITED": "🚪",
+}
 
 
 async def _send_long(message, text: str) -> None:
@@ -78,6 +88,88 @@ def _authorized_only(handler: Callable) -> Callable:
 
 
 # ---------------------------------------------------------------------------
+# Message formatting
+# ---------------------------------------------------------------------------
+
+
+def format_rebalance_message(rebalance, *, now: datetime | None = None) -> str:
+    """Format a MonthlyRebalance into a compact, mobile-friendly Telegram message.
+
+    Args:
+        rebalance: A MonthlyRebalance instance.
+        now: Override the current datetime (for deterministic tests).
+
+    Returns:
+        A formatted string of approximately 1000 chars (hard ceiling: 4096).
+    """
+    ts = now or datetime.now()
+    month_year = ts.strftime("%B %Y")
+    top_n = settings.iwda_top_n
+
+    lines: list[str] = []
+
+    # Validation warning — prepend if present
+    if "⚠️ validation flagged" in rebalance.summary:
+        lines.append(rebalance.summary)
+        lines.append("")
+
+    # Header
+    lines.append(f"📊 {month_year} Rebalance")
+    lines.append("")
+
+    # Portfolio vs IWDA top-N
+    lines.append(f"🎯 Portfolio vs IWDA Top {top_n}")
+    for entry in rebalance.portfolio_vs_index:
+        emoji = _ACTION_EMOJI.get(entry.action, "▸")
+        lines.append(
+            f"{emoji} {entry.ticker:<6} {entry.portfolio_pct:.1f}% → {entry.index_pct:.1f}%"
+        )
+    lines.append("")
+
+    # Stock allocations
+    sorted_allocs = sorted(rebalance.stock_allocation, key=lambda a: a.amount_eur, reverse=True)
+    total_alloc = sum(a.amount_eur for a in sorted_allocs)
+    lines.append(f"💰 Stocks €{total_alloc:.0f}")
+    for alloc in sorted_allocs:
+        lines.append(f"▸ €{alloc.amount_eur:.0f} {alloc.ticker}")
+    lines.append("")
+
+    # Buffer recommendation
+    buf = rebalance.buffer_recommendation
+    lines.append(f"💡 Buffer €{buf.amount_eur:.0f}")
+    lines.append(f"▸ {buf.rationale}")
+    lines.append("")
+
+    # Tracking error
+    te = rebalance.tracking_error
+    if te.tracking_error_pp is not None:
+        lines.append(f"📈 Tracking: {te.tracking_error_pp:+.1f}pp vs IWDA")
+    else:
+        lines.append("📈 Tracking: insufficient data")
+
+    # Tax summary
+    tax = rebalance.tax_summary
+    lines.append(f"📋 Tax: €{tax.exemption_remaining_eur:.0f} / €1,270 remaining")
+
+    # Sells block
+    sells = rebalance.sell_recommendations
+    if sells:
+        lines.append("🔴 Sells:")
+        for sell in sells:
+            lines.append(
+                f"▸ {sell.shares:.1f} {sell.ticker} ({sell.reason})  +€{sell.realized_gain_eur:.0f}"
+            )
+    else:
+        lines.append("✅ No sells")
+    lines.append("")
+
+    # Reminder
+    lines.append("💬 Record buys with /buy to stay synced")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Command handlers
 # ---------------------------------------------------------------------------
 
@@ -103,7 +195,7 @@ async def cmd_rebalance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     from advisor import monthly_rebalance  # noqa: PLC0415
 
     log.info("cmd_rebalance: requested by chat_id=%s", update.effective_chat.id)
-    await update.message.reply_text("Generating rebalance recommendations\u2026 (30+ seconds)")
+    await update.message.reply_text("Generating rebalance recommendations… (30+ seconds)")
     loop = asyncio.get_running_loop()
     try:
         response = await loop.run_in_executor(_executor, monthly_rebalance)
@@ -124,8 +216,8 @@ async def cmd_rebalance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     except Exception as exc:
         log.warning("cmd_rebalance: save_report failed: %s", exc)
 
-    summary = response.summary or "Rebalance analysis complete."
-    await update.message.reply_text(summary)
+    msg = format_rebalance_message(response)
+    await update.message.reply_text(msg)
 
 
 @_authorized_only
@@ -139,7 +231,7 @@ async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     ticker = context.args[0].upper()
     log.info("cmd_analyze: ticker=%s chat_id=%s", ticker, update.effective_chat.id)
-    await update.message.reply_text(f"Analyzing {ticker}\u2026 (30+ seconds)")
+    await update.message.reply_text(f"Analyzing {ticker}… (30+ seconds)")
     loop = asyncio.get_running_loop()
     try:
         response = await loop.run_in_executor(_executor, analyze_opportunity, ticker)
@@ -203,7 +295,7 @@ async def cmd_buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             (ticker, shares, price_eur, today, pool),
         )
 
-    await update.message.reply_text(f"Bought {shares} {ticker} @ \u20ac{price_eur:.2f} ({pool})")
+    await update.message.reply_text(f"Bought {shares} {ticker} @ €{price_eur:.2f} ({pool})")
 
 
 @_authorized_only
@@ -256,7 +348,23 @@ async def cmd_sell(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         else:
             conn.execute("DELETE FROM holdings WHERE id = ?", (holding["id"],))
 
-    await update.message.reply_text(f"Sold {shares} {ticker} @ \u20ac{price_eur:.2f}")
+    await update.message.reply_text(f"Sold {shares} {ticker} @ €{price_eur:.2f}")
+
+
+@_authorized_only
+async def cmd_update_iwda(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /update_iwda — manually refresh the IWDA top-N snapshot."""
+    import iwda_fetcher  # noqa: PLC0415
+
+    loop = asyncio.get_running_loop()
+    top_n = settings.iwda_top_n
+    try:
+        holdings = await loop.run_in_executor(_executor, iwda_fetcher.fetch_and_save)
+        tickers = [h.ticker for h in holdings[:5]]
+        tickers_str = ", ".join(tickers)
+        await update.message.reply_text(f"✅ Updated IWDA top-{top_n}: {tickers_str}")
+    except Exception as exc:
+        await update.message.reply_text(f"❌ IWDA update failed: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -276,10 +384,10 @@ def _safe_run(cmd_fn: Callable[[], None], name: str) -> None:
 
 def _monthly_check() -> None:
     """Run monthly pipeline on the 1st of each month at 08:00."""
-    from run_pipeline import cmd_monthly  # noqa: PLC0415
+    from run_pipeline import cmd_iwda  # noqa: PLC0415
 
     if datetime.now().day == 1:
-        _safe_run(cmd_monthly, "monthly")
+        _safe_run(cmd_iwda, "iwda_monthly")
 
 
 def _run_purge_reports() -> None:
@@ -291,7 +399,7 @@ def _run_purge_reports() -> None:
 
 
 def _run_purge_pipeline_data() -> None:
-    """Purge old news, alerts, screener candidates, and fundamentals."""
+    """Purge old news and alerts."""
     from purge import purge_all  # noqa: PLC0415
 
     counts = purge_all()
@@ -300,11 +408,10 @@ def _run_purge_pipeline_data() -> None:
 
 def _setup_schedule() -> None:
     """Register all scheduled pipeline tasks."""
-    from run_pipeline import cmd_daily, cmd_hourly, cmd_weekly  # noqa: PLC0415
+    from run_pipeline import cmd_daily, cmd_hourly  # noqa: PLC0415
 
     schedule.every().hour.do(_safe_run, cmd_hourly, "hourly")
     schedule.every().day.at("06:00").do(_safe_run, cmd_daily, "daily")
-    schedule.every().sunday.at("07:00").do(_safe_run, cmd_weekly, "weekly")
     schedule.every().day.at("08:00").do(_monthly_check)
     schedule.every().day.at("03:00").do(_run_purge_reports)
     schedule.every().day.at("03:05").do(_run_purge_pipeline_data)
@@ -334,6 +441,7 @@ def _build_application() -> Application | None:
     app.add_handler(CommandHandler("sell", cmd_sell))
     app.add_handler(CommandHandler("rebalance", cmd_rebalance))
     app.add_handler(CommandHandler("analyze", cmd_analyze))
+    app.add_handler(CommandHandler("update_iwda", cmd_update_iwda))
     return app
 
 
@@ -348,7 +456,7 @@ def main() -> None:
     If TELEGRAM_BOT_TOKEN is not set, runs in scheduler-only mode.
     """
     setup_logging(settings.log_dir)
-    log.info("WealthAgent bot starting\u2026")
+    log.info("WealthAgent bot starting…")
 
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
@@ -359,12 +467,12 @@ def main() -> None:
     log.info("Scheduler started (thread: %s)", scheduler_thread.name)
 
     if not settings.telegram_bot_token:
-        log.warning("TELEGRAM_BOT_TOKEN not set \u2014 running scheduler only (no bot)")
+        log.warning("TELEGRAM_BOT_TOKEN not set — running scheduler only (no bot)")
         while True:
             time.sleep(3600)
 
     app = _build_application()
-    log.info("Starting Telegram bot polling\u2026")
+    log.info("Starting Telegram bot polling…")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
