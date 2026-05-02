@@ -81,6 +81,9 @@ known-first-party = ["config"]
 "src/telegram_bot.py" = [
     "PLC0415", # lazy imports in handlers and scheduler functions are intentional
 ]
+"src/context_builder.py" = [
+    "PLC0415", # lazy import of price_fetcher inside _compute_tracking_error avoids circular dep
+]
 
 # ---------------------------------------------------------------------------
 # Pytest
